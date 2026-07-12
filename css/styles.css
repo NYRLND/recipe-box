@@ -785,9 +785,25 @@ a { color: inherit; }
   text-align: center;
 }
 .onboard .mark {
-  width: 64px; height: 64px; border-radius: 18px;
+  width: 72px; height: 72px; border-radius: 20px;
   background: var(--color-accent);
   margin-bottom: 20px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display);
+  font-size: 2rem; font-weight: 600;
+  color: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  position: relative;
+}
+.onboard .mark::before {
+  content: '';
+  position: absolute;
+  inset: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-gold);
+}
+.onboard .mark::after {
+  content: 'H';
 }
 .onboard h1 { margin-bottom: 8px; }
 .onboard p { color: var(--color-ink-soft); margin-bottom: 30px; }

@@ -1,4 +1,4 @@
-const CACHE = 'house-special-v2';
+const CACHE = 'house-special-v3';
 const SHELL = [
   './',
   './index.html',
@@ -8,7 +8,8 @@ const SHELL = [
   './js/supabase-client.js',
   './manifest.json',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './icons/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (e) => {
