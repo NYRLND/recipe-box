@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Table for Two</title>
+<meta name="description" content="A shared recipe box, grocery list, and meal plan for two.">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#EDE6DA">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Table for Two">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&family=Caveat:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ONBOARDING -->
+  <div class="onboard view" id="view-onboard" hidden>
+    <div class="mark"></div>
+    <h1>Table for Two</h1>
+    <p>Your shared recipe box, grocery list, and meal plan.</p>
+    <div class="who-picker">
+      <button data-who="Dan">Dan</button>
+      <button data-who="Melissa">Melissa</button>
+    </div>
+  </div>
+
+  <!-- TOP BAR (shown on main views) -->
+  <div class="topbar" id="topbar" hidden>
+    <div>
+      <div class="eyebrow" id="topbar-eyebrow">Recipe Box</div>
+      <h1 id="topbar-title" style="font-size:1.5rem;">Good evening</h1>
+    </div>
+    <button class="who-badge" id="who-badge">D</button>
+  </div>
+
+  <!-- RECIPE BOX -->
+  <main class="view" id="view-box" hidden>
+    <div class="search-row">
+      <input class="search-input" id="search-input" placeholder="Search your recipe box…">
+    </div>
+    <div class="chip-row" id="tag-chips"></div>
+    <div class="recipe-grid" id="recipe-grid"></div>
+    <div class="empty-state" id="box-empty" hidden>
+      <h3>Your recipe box is empty</h3>
+      <p>Tap the + to import your first recipe from a link, or add one by hand.</p>
+    </div>
+  </main>
+
+  <!-- RECIPE DETAIL -->
+  <main class="view" id="view-detail" hidden>
+    <button class="btn-ghost" id="detail-back" style="padding:0 0 10px;">&larr; Back</button>
+    <div class="hero-image" id="detail-hero"></div>
+    <div class="detail-header">
+      <h1 id="detail-title">Recipe title</h1>
+      <div class="source-line" id="detail-source"></div>
+    </div>
+    <div class="meta-row">
+      <div class="meta-item">
+        <div class="label">Servings</div>
+        <div class="servings-control">
+          <button id="serv-minus">–</button>
+          <div class="value" id="serv-value">4</div>
+          <button id="serv-plus">+</button>
+        </div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Prep</div>
+        <div class="value" id="detail-prep">–</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Cook</div>
+        <div class="value" id="detail-cook">–</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Cooked</div>
+        <div class="value" id="detail-times">0×</div>
+      </div>
+    </div>
+
+    <div class="section-label">Ingredients
+      <button class="btn-ghost" id="add-all-grocery" style="font-size:0.78rem;padding:4px 0;">+ Add all to list</button>
+    </div>
+    <div id="detail-ingredients"></div>
+
+    <div class="section-label">Steps</div>
+    <div id="detail-steps"></div>
+
+    <div class="section-label" id="notes-label" hidden>Notes</div>
+    <div id="detail-notes"></div>
+
+    <div class="action-row">
+      <button class="btn btn-secondary" id="btn-remix">Remix &amp; save</button>
+      <button class="btn btn-primary" id="btn-cook">Cook mode</button>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-secondary" id="btn-share">Share recipe</button>
+      <button class="btn btn-secondary" id="btn-plan">Add to plan</button>
+    </div>
+  </main>
+
+  <!-- IMPORT -->
+  <main class="view" id="view-import" hidden>
+    <button class="btn-ghost" id="import-back" style="padding:0 0 10px;">&larr; Back</button>
+    <div class="import-hero">
+      <h2>Add a recipe</h2>
+      <p>Paste a link and we'll pull in the ingredients and steps automatically.</p>
+    </div>
+    <div class="paste-box">
+      <input class="search-input" id="import-url" placeholder="https://www.damndelicious.net/…" inputmode="url">
+      <button class="btn btn-primary" id="import-go" style="width:auto;padding:12px 18px;">Go</button>
+    </div>
+    <div class="source-strip">
+      <span class="src">Damn Delicious</span>
+      <span class="src">Once Upon a Chef</span>
+      <span class="src">NYT Cooking</span>
+      <span class="src">Any recipe site</span>
+    </div>
+    <div class="import-status" id="import-status" hidden></div>
+    <button class="btn btn-ghost" id="import-manual" style="margin-top:22px;">Or type in a recipe by hand →</button>
+  </main>
+
+  <!-- RECIPE EDITOR (import preview / manual add / remix) -->
+  <main class="view" id="view-editor" hidden>
+    <button class="btn-ghost" id="editor-back" style="padding:0 0 10px;">&larr; Back</button>
+    <h2 id="editor-heading">Review recipe</h2>
+    <div class="field">
+      <label>Title</label>
+      <input id="ed-title" placeholder="Recipe title">
+    </div>
+    <div class="field">
+      <label>Source</label>
+      <input id="ed-source" placeholder="e.g. Damn Delicious">
+    </div>
+    <div class="field">
+      <label>Image URL</label>
+      <input id="ed-image" placeholder="https://…">
+    </div>
+    <div style="display:flex;gap:12px;">
+      <div class="field" style="flex:1;">
+        <label>Servings</label>
+        <input id="ed-servings" type="number" placeholder="4">
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Prep time</label>
+        <input id="ed-prep" placeholder="15 min">
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Cook time</label>
+        <input id="ed-cook" placeholder="30 min">
+      </div>
+    </div>
+
+    <div class="section-label">Ingredients</div>
+    <div class="list-editor" id="ed-ingredients"></div>
+    <button class="add-row-btn" id="add-ingredient-row">+ Add ingredient</button>
+
+    <div class="section-label">Steps</div>
+    <div class="list-editor" id="ed-steps"></div>
+    <button class="add-row-btn" id="add-step-row">+ Add step</button>
+
+    <div class="field" id="ed-note-field">
+      <label id="ed-note-label">Note (optional)</label>
+      <textarea id="ed-note" placeholder="What did you change? How did it turn out?"></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="ed-save" style="margin-top:24px;">Save to recipe box</button>
+  </main>
+
+  <!-- GROCERY LIST -->
+  <main class="view" id="view-grocery" hidden>
+    <div id="grocery-content"></div>
+    <div class="empty-state" id="grocery-empty" hidden>
+      <h3>List's empty</h3>
+      <p>Add items below, or add all ingredients from a recipe you're cooking.</p>
+    </div>
+    <div class="add-item-row">
+      <input class="search-input" id="grocery-add-input" placeholder="Add an item…">
+      <button class="btn btn-primary" id="grocery-add-btn" style="width:auto;padding:12px 18px;">Add</button>
+    </div>
+  </main>
+
+  <!-- MEAL PLAN (flexible 3-day) -->
+  <main class="view" id="view-plan" hidden>
+    <h2>Next up</h2>
+    <p style="color:var(--color-ink-soft);font-size:0.88rem;margin-top:4px;">Plan the next three days — no full-week pressure.</p>
+    <div class="day-strip" id="day-strip"></div>
+  </main>
+
+  <!-- TAB BAR -->
+  <nav class="tabbar" id="tabbar" hidden>
+    <button class="tab active" data-tab="box">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h16M4 8l1.5 11a1 1 0 001 .9h11a1 1 0 001-.9L20 8M9 8V6a3 3 0 016 0v2"/></svg>
+      Recipe Box
+    </button>
+    <button class="tab" data-tab="plan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+      Plan
+    </button>
+    <button class="tab" data-tab="grocery">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6L5 3H2M9 20a1 1 0 100-2 1 1 0 000 2zM17 20a1 1 0 100-2 1 1 0 000 2z"/></svg>
+      Grocery
+    </button>
+  </nav>
+
+  <button class="fab" id="fab-add" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+
+</div>
+
+<!-- COOK MODE OVERLAY -->
+<div class="cook-mode" id="cook-mode" hidden>
+  <button class="close-btn" id="cook-close">&times;</button>
+  <div class="step-display">
+    <div class="step-num-big" id="cook-step-num">Step 1 of 8</div>
+    <div class="step-text-big" id="cook-step-text"></div>
+    <button class="timer-chip" id="cook-timer" hidden>⏱ Start timer</button>
+  </div>
+  <div class="nav-row">
+    <button class="btn btn-secondary" id="cook-prev">Back</button>
+    <button class="btn btn-primary" id="cook-next">Next</button>
+  </div>
+</div>
+
+<!-- SHARE / ACTION SHEET -->
+<div class="sheet-backdrop" id="sheet-backdrop"></div>
+<div class="sheet" id="share-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:14px;">Share this recipe</h3>
+  <button class="btn btn-secondary" id="share-whatsapp" style="width:100%;margin-bottom:10px;justify-content:flex-start;">💬 WhatsApp</button>
+  <button class="btn btn-secondary" id="share-sms" style="width:100%;margin-bottom:10px;justify-content:flex-start;">✉️ Text message</button>
+  <button class="btn btn-secondary" id="share-copy" style="width:100%;justify-content:flex-start;">📋 Copy text</button>
+</div>
+
+<!-- PLAN PICKER SHEET -->
+<div class="sheet-backdrop" id="plan-sheet-backdrop"></div>
+<div class="sheet" id="plan-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:14px;">Add to which day?</h3>
+  <div id="plan-sheet-days"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
