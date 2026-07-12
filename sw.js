@@ -1,4 +1,4 @@
-const CACHE = 'table-for-two-v1';
+const CACHE = 'house-special-v2';
 const SHELL = [
   './',
   './index.html',

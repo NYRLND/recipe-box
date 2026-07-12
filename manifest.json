@@ -1,7 +1,7 @@
 {
-  "name": "Table for Two",
-  "short_name": "Table for Two",
-  "description": "A shared recipe box, grocery list, and meal plan.",
+  "name": "House Special",
+  "short_name": "House Special",
+  "description": "The family kitchen — recipes, groceries, and what's for dinner.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

@@ -1,4 +1,4 @@
-# Table for Two
+# House Special
 
 A shared recipe box, grocery list, and 3-day meal plan for Dan & Melissa. No login, installs to the home screen like a native app.
 

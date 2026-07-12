@@ -137,14 +137,26 @@ async function importRecipe(url: string) {
 
 /* ---------------- search / feed helpers ---------------- */
 
+// Articles like "35 Best Chicken Recipes" or meal-prep roundups contain many
+// recipes and can't be imported as one — filter them out of Discover.
+function looksLikeRoundup(title: string, url: string): boolean {
+  const t = title.toLowerCase();
+  const u = url.toLowerCase();
+  if (/\b\d{1,3}\s+(?:\w+\s+){0,3}recipes\b/.test(t)) return true;      // "35 best chicken recipes"
+  if (/\brecipes\s+(?:for|to)\b/.test(t) && /\b\d{1,3}\b/.test(t)) return true;
+  if (/round-?up|meal\s*plan|meal\s*prep\s*(?:menu|plan|ideas)|gift guide|what to cook|weekly menu|dinner ideas/i.test(t)) return true;
+  if (/round-?up|meal-?plan|weekly-menu|gift-guide/.test(u)) return true;
+  return false;
+}
+
 function decodeEntities(s: string): string {
   return s.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n)))
     .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#8217;|&rsquo;/g, "'")
     .replace(/&#8211;|&ndash;/g, "–").replace(/<[^>]*>/g, "").trim();
 }
 
-async function wpSearch(site: { name: string; host: string }, query: string, perPage: number) {
-  const url = `https://${site.host}/wp-json/wp/v2/posts?search=${encodeURIComponent(query)}&per_page=${perPage}&_embed=wp:featuredmedia&orderby=relevance`;
+async function wpSearch(site: { name: string; host: string }, query: string, perPage: number, page: number) {
+  const url = `https://${site.host}/wp-json/wp/v2/posts?search=${encodeURIComponent(query)}&per_page=${perPage}&page=${page}&_embed=wp:featuredmedia&orderby=relevance`;
   const resp = await fetch(url, { headers: UA });
   if (!resp.ok) throw new Error(`${resp.status}`);
   const posts = await resp.json();
@@ -155,7 +167,7 @@ async function wpSearch(site: { name: string; host: string }, query: string, per
     image: p._embedded?.["wp:featuredmedia"]?.[0]?.media_details?.sizes?.medium_large?.source_url
         || p._embedded?.["wp:featuredmedia"]?.[0]?.source_url || "",
     source: site.name,
-  })).filter((r: any) => r.title && r.url);
+  })).filter((r: any) => r.title && r.url && !looksLikeRoundup(r.title, r.url));
 }
 
 // Fallback for sites that disable the REST API: parse their HTML search page.
@@ -173,31 +185,52 @@ async function htmlSearch(site: { name: string; host: string }, query: string, l
     if (!href.includes(site.host.replace("www.", ""))) continue;
     if (/\/(category|tag|about|contact|page|author|shop|privacy)\//i.test(href)) continue;
     if (seen.has(href) || !text || /^(read more|continue|home|recipes?)$/i.test(text)) continue;
+    if (looksLikeRoundup(text, href)) continue;
     seen.add(href);
     results.push({ title: text, url: href, image: "", source: site.name });
   }
   return results;
 }
 
-async function searchSites(query: string) {
-  const perSite = 4;
-  const settled = await Promise.allSettled(
-    SITES.map(async (site) => {
-      try { return await wpSearch(site, query, perSite); }
-      catch (_e) { return await htmlSearch(site, query, perSite); }
-    })
-  );
+// NYT Cooking: no public API, but its search page server-renders recipe links
+// (/recipes/{id}-{slug}). Best effort — titles derived from the slug.
+async function nytSearch(query: string, limit: number) {
+  const resp = await fetch(`https://cooking.nytimes.com/search?q=${encodeURIComponent(query)}`, { headers: UA });
+  if (!resp.ok) throw new Error(`${resp.status}`);
+  const html = await resp.text();
   const results: any[] = [];
-  // interleave so no single site dominates the top
+  const seen = new Set<string>();
+  const re = /href="(\/recipes\/(\d+)-([a-z0-9-]+))"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null && results.length < limit) {
+    const path = m[1];
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const title = m[3].split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    results.push({ title, url: `https://cooking.nytimes.com${path}`, image: "", source: "NYT Cooking" });
+  }
+  return results;
+}
+
+async function searchSites(query: string, page: number) {
+  const perSite = 4;
+  const tasks: Promise<any[]>[] = SITES.map(async (site) => {
+    try { return await wpSearch(site, query, perSite, page); }
+    catch (_e) { return page === 1 ? await htmlSearch(site, query, perSite) : []; }
+  });
+  // NYT only on the first page (its search page isn't paginated the same way)
+  if (page === 1) tasks.push(nytSearch(query, 4).catch(() => []));
+  const settled = await Promise.allSettled(tasks);
+  const results: any[] = [];
   const lists = settled.map((s) => (s.status === "fulfilled" ? s.value : []));
   for (let i = 0; i < perSite; i++) for (const list of lists) if (list[i]) results.push(list[i]);
   return results;
 }
 
-async function latestFeed() {
+async function latestFeed(page: number) {
   const settled = await Promise.allSettled(
     SITES.map(async (site) => {
-      const url = `https://${site.host}/wp-json/wp/v2/posts?per_page=2&_embed=wp:featuredmedia`;
+      const url = `https://${site.host}/wp-json/wp/v2/posts?per_page=3&page=${page}&_embed=wp:featuredmedia`;
       const resp = await fetch(url, { headers: UA });
       if (!resp.ok) throw new Error(`${resp.status}`);
       const posts = await resp.json();
@@ -207,12 +240,12 @@ async function latestFeed() {
         image: p._embedded?.["wp:featuredmedia"]?.[0]?.media_details?.sizes?.medium_large?.source_url
             || p._embedded?.["wp:featuredmedia"]?.[0]?.source_url || "",
         source: site.name,
-      }));
+      })).filter((r: any) => r.title && r.url && !looksLikeRoundup(r.title, r.url));
     })
   );
   const results: any[] = [];
   const lists = settled.map((s) => (s.status === "fulfilled" ? s.value : []));
-  for (let i = 0; i < 2; i++) for (const list of lists) if (list[i]) results.push(list[i]);
+  for (let i = 0; i < 3; i++) for (const list of lists) if (list[i]) results.push(list[i]);
   return results;
 }
 
@@ -225,10 +258,11 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
+    const page = Math.max(1, Math.min(10, parseInt(body.page) || 1));
 
     if (body.url) return json(await importRecipe(String(body.url)));
-    if (body.search) return json({ results: await searchSites(String(body.search).slice(0, 80)) });
-    if (body.feed) return json({ results: await latestFeed() });
+    if (body.search) return json({ results: await searchSites(String(body.search).slice(0, 80), page) });
+    if (body.feed) return json({ results: await latestFeed(page) });
 
     return json({ error: "Send { url }, { search }, or { feed: true }" }, 400);
   } catch (err) {

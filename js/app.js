@@ -157,12 +157,18 @@ async function boot() {
 
   if (!state.member) {
     showView('view-onboard');
-    qsa('.who-picker button').forEach(b => b.addEventListener('click', async () => {
-      const m = state.members.find(x => x.name === b.dataset.who) || { id: null, name: b.dataset.who };
-      state.member = m;
-      localStorage.setItem('t42_member', JSON.stringify(m));
-      startApp();
-    }));
+    const picker = qs('#who-picker');
+    picker.innerHTML = '';
+    const names = state.members.length ? state.members : [{ id: null, name: 'Dan' }, { id: null, name: 'Melissa' }];
+    names.forEach(m => {
+      const b = el('button', null, m.name);
+      b.addEventListener('click', () => {
+        state.member = m;
+        localStorage.setItem('t42_member', JSON.stringify(m));
+        startApp();
+      });
+      picker.appendChild(b);
+    });
     return;
   }
   startApp();
@@ -183,7 +189,9 @@ function greeting() {
 }
 
 qs('#who-badge').addEventListener('click', () => {
-  const other = state.members.find(m => m.name !== state.member.name) || { name: state.member.name === 'Dan' ? 'Melissa' : 'Dan' };
+  if (!state.members.length) return;
+  const idx = state.members.findIndex(m => m.name === state.member.name);
+  const other = state.members[(idx + 1) % state.members.length];
   state.member = other;
   localStorage.setItem('t42_member', JSON.stringify(other));
   qs('#who-badge').textContent = other.name[0];
@@ -281,15 +289,30 @@ async function toggleFavorite(recipeId, btnEl) {
 
 qs('#search-input').addEventListener('input', (e) => { state.searchTerm = e.target.value; drawGrid(); });
 
-/* ================= Recipe Detail ================= */
+/* ================= Recipe Detail (shared renderer: saved recipes + import previews) ================= */
 
 async function openDetail(id) {
   const r = state.recipes.find(x => x.id === id) || (await supabase.from('recipes').select('*').eq('id', id).single()).data;
+  renderRecipeDetail(r, { preview: false });
+}
+
+function openDraftPreview() {
+  renderRecipeDetail(state.draft, { preview: true });
+}
+
+function renderRecipeDetail(r, { preview }) {
   state.currentRecipe = r;
+  state.previewMode = preview;
   state.currentServings = r.servings || 4;
   showView('view-detail');
 
+  qs('#detail-actions-normal').hidden = preview;
+  qs('#detail-actions-normal-2').hidden = preview;
+  qs('#btn-delete').hidden = preview;
+  qs('#detail-actions-preview').hidden = !preview;
+
   qs('#detail-hero').style.backgroundImage = r.image_url ? `url('${r.image_url}')` : 'none';
+  qs('#detail-hero').style.display = r.image_url ? '' : 'none';
   qs('#detail-title').textContent = r.title;
   qs('#detail-source').innerHTML = r.source_url
     ? `From <a href="${r.source_url}" target="_blank" rel="noopener">${r.source || 'the web'}</a>`
@@ -302,7 +325,44 @@ async function openDetail(id) {
   renderDetailIngredients();
   renderDetailSteps();
   renderDetailNotes();
+  window.scrollTo(0, 0);
 }
+
+qs('#surprise-btn').addEventListener('click', () => {
+  if (!state.recipes.length) return toast('Add some recipes first!');
+  // favorites count double so the family's loves come up more often
+  const pool = [...state.recipes, ...state.recipes.filter(r => state.favorites.has(r.id))];
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  toast('Tonight\'s house special…');
+  setTimeout(() => openDetail(pick.id), 400);
+});
+
+qs('#btn-preview-edit').addEventListener('click', () => openEditor());
+qs('#btn-preview-save').addEventListener('click', async () => {
+  const d = state.draft;
+  if (!d.title) return toast('This one has no title — tap Edit details');
+  const { data, error } = await supabase.from('recipes').insert({
+    title: d.title, source: d.source, source_url: d.source_url || null, image_url: d.image_url,
+    servings: d.servings || 4, prep_time: d.prep_time, cook_time: d.cook_time,
+    ingredients: d.ingredients || [], steps: d.steps || [], tags: d.tags || [],
+    notes: d.notes || '', created_by: state.member.id, parent_recipe_id: state.parentForRemix,
+  }).select().single();
+  if (error) return toast('Could not save — try again');
+  toast('Saved to your recipe box');
+  await renderBox();
+  openDetail(data.id);
+});
+
+qs('#btn-delete').addEventListener('click', async () => {
+  const r = state.currentRecipe;
+  if (!confirm(`Remove "${r.title}" from the recipe box? This is for the whole family and can't be undone.`)) return;
+  // detach any remixes so the foreign key doesn't block deletion
+  await supabase.from('recipes').update({ parent_recipe_id: null }).eq('parent_recipe_id', r.id);
+  const { error } = await supabase.from('recipes').delete().eq('id', r.id);
+  if (error) return toast('Could not delete — try again');
+  toast('Removed');
+  setTab('box');
+});
 
 function renderDetailIngredients() {
   const r = state.currentRecipe;
@@ -338,13 +398,9 @@ function renderDetailNotes() {
   const label = qs('#notes-label');
   const box = qs('#detail-notes');
   box.innerHTML = '';
-  if (r.notes) {
-    label.hidden = false;
-    const card = el('div', 'note-card', `${r.notes}<span class="note-author">— ${memberNameFor(r)}</span>`);
-    box.appendChild(card);
-  } else {
-    label.hidden = true;
-  }
+  const lines = (r.notes || '').split('\n').map(s => s.trim()).filter(Boolean);
+  label.hidden = !lines.length;
+  lines.forEach(line => box.appendChild(el('div', 'note-card', line)));
 }
 
 function memberNameFor(r) {
@@ -389,7 +445,30 @@ qs('#btn-cook').addEventListener('click', () => {
   supabase.from('recipes').update({ times_cooked: r.times_cooked }).eq('id', r.id).then(() => {});
 });
 qs('#cook-close').addEventListener('click', () => { qs('#cook-mode').hidden = true; clearInterval(state.timerInterval); });
-qs('#cook-next').addEventListener('click', () => { if (state.cookIndex < state.cookRecipe.steps.length - 1) { state.cookIndex++; showCookStep(); } else { qs('#cook-mode').hidden = true; toast('All done — enjoy!'); } });
+qs('#cook-next').addEventListener('click', () => {
+  if (state.cookIndex < state.cookRecipe.steps.length - 1) { state.cookIndex++; showCookStep(); }
+  else {
+    qs('#cook-mode').hidden = true;
+    clearInterval(state.timerInterval);
+    qs('#cooked-note').value = '';
+    openSheet('cooked-sheet', 'cooked-sheet-backdrop');
+  }
+});
+
+qs('#cooked-skip').addEventListener('click', () => closeSheet('cooked-sheet', 'cooked-sheet-backdrop'));
+qs('#cooked-sheet-backdrop').addEventListener('click', () => closeSheet('cooked-sheet', 'cooked-sheet-backdrop'));
+qs('#cooked-save').addEventListener('click', async () => {
+  const note = qs('#cooked-note').value.trim();
+  closeSheet('cooked-sheet', 'cooked-sheet-backdrop');
+  if (!note) return;
+  const r = state.cookRecipe;
+  const dateStr = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const entry = `${note} (${state.member.name}, ${dateStr})`;
+  r.notes = r.notes ? `${r.notes}\n${entry}` : entry;
+  await supabase.from('recipes').update({ notes: r.notes }).eq('id', r.id);
+  if (state.currentRecipe?.id === r.id) renderDetailNotes();
+  toast('Note saved to the recipe');
+});
 qs('#cook-prev').addEventListener('click', () => { if (state.cookIndex > 0) { state.cookIndex--; showCookStep(); } });
 
 function showCookStep() {
@@ -535,7 +614,7 @@ async function importFromUrl(url, statusEl) {
   state.draftMode = 'import';
   state.parentForRemix = null;
   if (statusEl) statusEl.hidden = true;
-  openEditor();
+  openDraftPreview();
 }
 
 qs('#import-go').addEventListener('click', async () => {
@@ -553,7 +632,8 @@ qs('#import-go').addEventListener('click', async () => {
 
 /* ================= Discover ================= */
 
-let feedLoaded = false;
+const DISCOVER_CATS = ['Chicken','Pasta','30-Minute','Seafood','Beef','Vegetarian','Soup','Salad','Slow Cooker','Dessert','Breakfast'];
+const disc = { mode: 'feed', query: '', page: 1, busy: false, done: false, started: false };
 
 function discoverCard(r) {
   const card = el('div', 'recipe-card');
@@ -569,55 +649,107 @@ function discoverCard(r) {
     const status = qs('#discover-status');
     try {
       await importFromUrl(r.url, status);
-      if (r.source) qs('#ed-source').value = r.source;
+      state.draft.source = r.source || state.draft.source;
     } catch (err) {
       status.hidden = false;
-      status.textContent = `Couldn't import that one (${err.message}) — try another, or paste its link on the add screen.`;
+      status.textContent = /No recipe data/.test(err.message)
+        ? `That one's an article, not a single recipe — try another card.`
+        : `Couldn't import that one (${err.message}) — try another.`;
     }
   });
   return card;
 }
 
-async function initDiscover() {
-  if (feedLoaded) return;
-  feedLoaded = true;
-  const status = qs('#discover-status');
-  status.hidden = false;
-  status.innerHTML = `<div class="spinner"></div> Loading fresh recipes…`;
+function renderDiscoverChips() {
+  const row = qs('#discover-chips');
+  if (row.children.length) return;
+  DISCOVER_CATS.forEach(cat => {
+    const c = el('button', 'chip', cat);
+    c.addEventListener('click', () => {
+      qsa('#discover-chips .chip').forEach(x => x.classList.toggle('active', x === c && !c.classList.contains('active')));
+      qs('#discover-input').value = c.classList.contains('active') ? cat : '';
+      if (c.classList.contains('active')) runDiscoverSearch(); else resetToFeed();
+    });
+    row.appendChild(c);
+  });
+}
+
+async function fetchDiscoverPage() {
+  if (disc.busy || disc.done) return;
+  disc.busy = true;
+  const more = qs('#discover-more-status');
+  if (disc.page > 1) more.hidden = false;
   try {
-    const data = await callImportFn({ feed: true });
-    status.hidden = true;
-    const feedBox = qs('#discover-feed');
-    feedBox.innerHTML = '';
-    (data.results || []).forEach(r => feedBox.appendChild(discoverCard(r)));
-    qs('#discover-feed-label').hidden = !(data.results || []).length;
+    const payload = disc.mode === 'search' ? { search: disc.query, page: disc.page } : { feed: true, page: disc.page };
+    const data = await callImportFn(payload);
+    const results = data.results || [];
+    const box = disc.mode === 'search' ? qs('#discover-results') : qs('#discover-feed');
+    results.forEach(r => box.appendChild(discoverCard(r)));
+    if (disc.page === 1) {
+      qs('#discover-results-label').hidden = !(disc.mode === 'search' && results.length);
+      qs('#discover-feed-label').hidden = !(disc.mode === 'feed' && results.length);
+      if (disc.mode === 'search' && !results.length) {
+        const s = qs('#discover-status');
+        s.hidden = false;
+        s.textContent = `No results for "${disc.query}" — try a simpler term, like one main ingredient.`;
+      }
+    }
+    if (!results.length) disc.done = true;
+    disc.page++;
   } catch (err) {
-    status.textContent = 'Could not load the recipe feed right now — search still works, or try again later.';
+    if (disc.page === 1) {
+      const s = qs('#discover-status');
+      s.hidden = false;
+      s.textContent = `Search hit a snag (${err.message}). Try again in a moment.`;
+    }
+    disc.done = true;
+  } finally {
+    disc.busy = false;
+    more.hidden = true;
   }
+}
+
+function resetDiscover(mode, query) {
+  disc.mode = mode; disc.query = query || ''; disc.page = 1; disc.done = false; disc.busy = false;
+  qs('#discover-results').innerHTML = '';
+  qs('#discover-results-label').hidden = true;
+  qs('#discover-status').hidden = true;
+  if (mode === 'search') {
+    qs('#discover-feed').innerHTML = '';
+    qs('#discover-feed-label').hidden = true;
+  }
+}
+
+function resetToFeed() {
+  resetDiscover('feed');
+  qs('#discover-feed').innerHTML = '';
+  const s = qs('#discover-status');
+  s.hidden = false;
+  s.innerHTML = `<div class="spinner"></div> Loading fresh recipes…`;
+  fetchDiscoverPage().then(() => { if (!disc.done || qs('#discover-feed').children.length) s.hidden = true; });
+}
+
+async function initDiscover() {
+  renderDiscoverChips();
+  if (disc.started) return;
+  disc.started = true;
+  resetToFeed();
+  // infinite scroll
+  const sentinel = qs('#discover-sentinel');
+  new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && !qs('#view-discover').hidden) fetchDiscoverPage();
+  }, { rootMargin: '400px' }).observe(sentinel);
 }
 
 async function runDiscoverSearch() {
   const q = qs('#discover-input').value.trim();
   if (!q) return;
+  resetDiscover('search', q);
   const status = qs('#discover-status');
   status.hidden = false;
   status.innerHTML = `<div class="spinner"></div> Searching your favorite sites…`;
-  qs('#discover-results').innerHTML = '';
-  qs('#discover-results-label').hidden = true;
-  try {
-    const data = await callImportFn({ search: q });
-    status.hidden = true;
-    const box = qs('#discover-results');
-    (data.results || []).forEach(r => box.appendChild(discoverCard(r)));
-    if ((data.results || []).length) {
-      qs('#discover-results-label').hidden = false;
-    } else {
-      status.hidden = false;
-      status.textContent = `No results for "${q}" — try a simpler term, like one main ingredient.`;
-    }
-  } catch (err) {
-    status.textContent = `Search hit a snag (${err.message}). Try again in a moment.`;
-  }
+  await fetchDiscoverPage();
+  if (qs('#discover-results').children.length) status.hidden = true;
 }
 
 qs('#discover-go').addEventListener('click', runDiscoverSearch);
@@ -643,15 +775,17 @@ function openEditor() {
   if (!d.ingredients?.length) addEditorRow(ingBox, '');
 
   const stepBox = qs('#ed-steps'); stepBox.innerHTML = '';
-  (d.steps || []).forEach(s => addEditorRow(stepBox, s));
-  if (!d.steps?.length) addEditorRow(stepBox, '');
+  (d.steps || []).forEach(s => addEditorRow(stepBox, s, true));
+  if (!d.steps?.length) addEditorRow(stepBox, '', true);
 
   showView('view-editor');
 }
 
-function addEditorRow(container, value) {
+function addEditorRow(container, value, multiline) {
   const row = el('div', 'row');
-  const input = el('input'); input.value = value || '';
+  const input = el(multiline ? 'textarea' : 'input');
+  input.value = value || '';
+  if (multiline) input.rows = 2;
   const rm = el('button', 'remove-row', '✕');
   rm.addEventListener('click', () => row.remove());
   row.appendChild(input); row.appendChild(rm);
@@ -659,14 +793,17 @@ function addEditorRow(container, value) {
 }
 
 qs('#add-ingredient-row').addEventListener('click', () => addEditorRow(qs('#ed-ingredients'), ''));
-qs('#add-step-row').addEventListener('click', () => addEditorRow(qs('#ed-steps'), ''));
-qs('#editor-back').addEventListener('click', () => setTab('box'));
+qs('#add-step-row').addEventListener('click', () => addEditorRow(qs('#ed-steps'), '', true));
+qs('#editor-back').addEventListener('click', () => {
+  if (state.draftMode === 'import') openDraftPreview();
+  else setTab('box');
+});
 
 qs('#ed-save').addEventListener('click', async () => {
   const title = qs('#ed-title').value.trim();
   if (!title) return toast('Give it a title first');
   const ingredients = qsa('#ed-ingredients input').map(i => i.value.trim()).filter(Boolean).map(parseIngredientLine);
-  const steps = qsa('#ed-steps input').map(i => i.value.trim()).filter(Boolean);
+  const steps = qsa('#ed-steps textarea, #ed-steps input').map(i => i.value.trim()).filter(Boolean);
 
   const payload = {
     title,
@@ -703,6 +840,12 @@ function drawGrocery() {
   const content = qs('#grocery-content');
   content.innerHTML = '';
   qs('#grocery-empty').hidden = state.groceryItems.length > 0;
+  if (state.groceryItems.length) {
+    const done = state.groceryItems.filter(i => i.checked).length;
+    const prog = el('div', 'grocery-progress',
+      `<div class="count">${done} of ${state.groceryItems.length} in the cart</div><div class="bar"><div style="width:${Math.round(done / state.groceryItems.length * 100)}%;"></div></div>`);
+    content.appendChild(prog);
+  }
   const byCat = {};
   state.groceryItems.forEach(item => {
     const cat = categorize(item.item);
@@ -734,10 +877,11 @@ function groceryRow(item) {
     ${item.amount ? `<div class="amt">${item.amount}</div>` : ''}`;
   row.querySelector('.check-circle').addEventListener('click', async (e) => {
     const next = !item.checked;
+    item.checked = next;
     e.currentTarget.classList.toggle('checked', next);
     row.classList.toggle('checked', next);
     await supabase.from('grocery_items').update({ checked: next }).eq('id', item.id);
-    item.checked = next;
+    drawGrocery();
   });
   return row;
 }
@@ -777,8 +921,13 @@ function drawPlan() {
     const entry = state.planEntries[day];
     const slot = el('div', 'day-slot' + (entry ? ' filled' : ''));
     if (entry) {
-      slot.innerHTML = `<div><div style="font-weight:700;">${entry.recipes.title}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to change</div></div>`;
-      slot.addEventListener('click', () => openDetail(entry.recipes.id));
+      slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;">${entry.recipes.title}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to open</div></div><button class="slot-remove" title="Remove">✕</button>`;
+      slot.querySelector('div').addEventListener('click', () => openDetail(entry.recipes.id));
+      slot.querySelector('.slot-remove').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await supabase.from('meal_plan').delete().eq('id', entry.id);
+        loadPlan();
+      });
     } else {
       slot.innerHTML = `<span class="plus">+ Choose a recipe</span>`;
       slot.addEventListener('click', () => { setTab('box'); toast('Pick a recipe, then "Add to plan"'); });
@@ -786,9 +935,8 @@ function drawPlan() {
     card.appendChild(slot);
     strip.appendChild(card);
   });
-  const addDay = el('div', 'day-card', `<div class="day-slot" style="min-height:90px;"><span class="plus">+ Add another day</span></div>`);
-  addDay.style.display = 'flex'; addDay.style.alignItems = 'center'; addDay.style.justifyContent = 'center';
-  addDay.querySelector('.day-slot').addEventListener('click', () => {
+  const addDay = el('button', 'add-row-btn', '+ Plan another day');
+  addDay.addEventListener('click', () => {
     state.planDays.push(todayISO(state.planDays.length));
     loadPlan();
   });

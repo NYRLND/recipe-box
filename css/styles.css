@@ -804,3 +804,115 @@ a { color: inherit; }
   color: var(--color-ink);
 }
 .who-picker button:active { border-color: var(--color-accent); background: var(--color-accent-wash); }
+
+/* ============================================================
+   v3 polish pass
+   ============================================================ */
+
+/* Buttons: kill the ugly tap-focus rectangle, keep keyboard focus */
+button:focus { outline: none; }
+button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-s); }
+
+/* Magazine-style recipe detail */
+.hero-image {
+  aspect-ratio: 4/3;
+  position: relative;
+  border-radius: 0 0 var(--radius-l) var(--radius-l);
+  overflow: hidden;
+}
+.hero-image::after {
+  content: '';
+  position: absolute;
+  inset: 55% 0 0 0;
+  background: linear-gradient(to bottom, transparent, rgba(43,42,37,0.35));
+}
+.detail-header h1 { font-size: 1.75rem; line-height: 1.12; }
+.detail-header { padding-top: 22px; }
+
+.ingredient-row { font-size: 1rem; padding: 12px 0; }
+.ingredient-row .amt { font-size: 0.88rem; }
+.step-row { padding: 16px 0; }
+.step-text { font-size: 1rem; line-height: 1.55; }
+.step-num {
+  font-size: 0.85rem;
+  font-weight: 700;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--color-accent-wash);
+  color: var(--color-accent);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-body);
+}
+
+/* Preview save bar — pinned so Save is always in reach while reading */
+.preview-bar {
+  position: sticky;
+  bottom: calc(74px + var(--safe-bottom));
+  display: flex;
+  gap: 10px;
+  margin-top: 26px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-m);
+  padding: 10px;
+  box-shadow: var(--shadow-raised);
+}
+.preview-bar .btn { flex: 1; }
+
+/* Editor: steps as growing textareas, not truncated single lines */
+.list-editor .row textarea {
+  flex: 1;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  padding: 11px 13px;
+  font-size: 0.92rem;
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  resize: vertical;
+  min-height: 44px;
+}
+
+/* Plan: vertical stack, no sideways scrolling */
+.day-strip {
+  flex-direction: column;
+  overflow-x: visible;
+  scroll-snap-type: none;
+  gap: 14px;
+}
+.day-card { width: 100%; scroll-snap-align: none; }
+.day-slot .slot-remove {
+  margin-left: auto;
+  background: none; border: none;
+  color: var(--color-ink-faint);
+  font-size: 1rem;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+/* Grocery header progress */
+.grocery-progress { margin-top: 4px; }
+.grocery-progress .count { font-size: 0.8rem; color: var(--color-ink-soft); font-weight: 600; }
+.grocery-progress .bar {
+  height: 5px;
+  background: var(--color-line);
+  border-radius: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.grocery-progress .bar > div {
+  height: 100%;
+  background: var(--color-success);
+  border-radius: 4px;
+  transition: width 250ms ease;
+}
+
+/* Recipe cards: slightly warmer, press feedback */
+.recipe-card { transition: transform 120ms ease; }
+.recipe-card:active { transform: scale(0.97); }
+.recipe-card .thumb { aspect-ratio: 1/0.82; }
+.recipe-card h3 { font-size: 1.02rem; }
+.recipe-card .source { margin-top: 2px; letter-spacing: 0.02em; text-transform: uppercase; font-size: 0.62rem; }
+
+/* Discover chips scroll row spacing */
+#discover-chips { margin-top: 12px; }

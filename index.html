@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>Table for Two</title>
-<meta name="description" content="A shared recipe box, grocery list, and meal plan for two.">
+<title>House Special</title>
+<meta name="description" content="The family kitchen — recipes, groceries, and what's for dinner.">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#EDE6DA">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Table for Two">
+<meta name="apple-mobile-web-app-title" content="House Special">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,12 +23,10 @@
   <!-- ONBOARDING -->
   <div class="onboard view" id="view-onboard" hidden>
     <div class="mark"></div>
-    <h1>Table for Two</h1>
+    <h1>House Special</h1>
     <p>Your shared recipe box, grocery list, and meal plan.</p>
-    <div class="who-picker">
-      <button data-who="Dan">Dan</button>
-      <button data-who="Melissa">Melissa</button>
-    </div>
+    <p style="font-size:0.82rem;margin-top:-16px;color:var(--color-ink-faint);">Who's cooking?</p>
+    <div class="who-picker" id="who-picker"></div>
   </div>
 
   <!-- TOP BAR (shown on main views) -->
@@ -44,6 +42,7 @@
   <main class="view" id="view-box" hidden>
     <div class="search-row">
       <input class="search-input" id="search-input" placeholder="Search your recipe box…">
+      <button class="btn btn-secondary" id="surprise-btn" title="Surprise us" style="width:auto;padding:0 14px;font-size:1.15rem;">🎲</button>
     </div>
     <div class="chip-row" id="tag-chips"></div>
     <div class="recipe-grid" id="recipe-grid"></div>
@@ -95,13 +94,20 @@
     <div class="section-label" id="notes-label" hidden>Notes</div>
     <div id="detail-notes"></div>
 
-    <div class="action-row">
+    <div class="action-row" id="detail-actions-normal">
       <button class="btn btn-secondary" id="btn-remix">Remix &amp; save</button>
       <button class="btn btn-primary" id="btn-cook">Cook mode</button>
     </div>
-    <div class="action-row">
+    <div class="action-row" id="detail-actions-normal-2">
       <button class="btn btn-secondary" id="btn-share">Share recipe</button>
       <button class="btn btn-secondary" id="btn-plan">Add to plan</button>
+    </div>
+    <button class="btn btn-ghost" id="btn-delete" style="width:100%;margin-top:16px;color:var(--color-danger);">Remove from recipe box</button>
+
+    <!-- Preview mode (unsaved import): magazine read first, edit only if wanted -->
+    <div class="preview-bar" id="detail-actions-preview" hidden>
+      <button class="btn btn-secondary" id="btn-preview-edit">Edit details</button>
+      <button class="btn btn-primary" id="btn-preview-save">Save to recipe box</button>
     </div>
   </main>
 
@@ -179,11 +185,14 @@
       <input class="search-input" id="discover-input" placeholder="Search recipes… e.g. chicken tikka" enterkeyhint="search">
       <button class="btn btn-primary" id="discover-go" style="width:auto;padding:12px 18px;">Search</button>
     </div>
+    <div class="chip-row" id="discover-chips"></div>
     <div class="import-status" id="discover-status" hidden></div>
     <div class="section-label" id="discover-results-label" hidden>Results</div>
     <div class="recipe-grid" id="discover-results"></div>
     <div class="section-label" id="discover-feed-label" hidden>Fresh from your favorite sites</div>
     <div class="recipe-grid" id="discover-feed"></div>
+    <div id="discover-sentinel" style="height:1px;"></div>
+    <div class="import-status" id="discover-more-status" hidden><div class="spinner"></div> Loading more…</div>
     <button class="btn btn-ghost" id="discover-paste-link" style="margin-top:22px;width:100%;">Have a specific link? Paste it instead →</button>
   </main>
 
@@ -263,6 +272,19 @@
   <div class="sheet-handle"></div>
   <h3 style="margin-bottom:14px;">Add to which day?</h3>
   <div id="plan-sheet-days"></div>
+</div>
+
+<!-- POST-COOK NOTE SHEET -->
+<div class="sheet-backdrop" id="cooked-sheet-backdrop"></div>
+<div class="sheet" id="cooked-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:4px;">How was it?</h3>
+  <p style="color:var(--color-ink-soft);font-size:0.85rem;margin-bottom:12px;">Leave a note for next time — it goes in the recipe.</p>
+  <textarea id="cooked-note" class="search-input" style="width:100%;min-height:80px;font-family:var(--font-body);" placeholder="e.g. Doubled the garlic. Kids devoured it."></textarea>
+  <div class="action-row">
+    <button class="btn btn-secondary" id="cooked-skip">Skip</button>
+    <button class="btn btn-primary" id="cooked-save">Save note</button>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
