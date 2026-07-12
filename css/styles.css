@@ -803,7 +803,7 @@ a { color: inherit; }
   border: 1.5px solid var(--color-gold);
 }
 .onboard .mark::after {
-  content: 'H';
+  content: 'R';
 }
 .onboard h1 { margin-bottom: 8px; }
 .onboard p { color: var(--color-ink-soft); margin-bottom: 30px; }
