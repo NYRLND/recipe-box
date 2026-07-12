@@ -1,6 +1,6 @@
 {
-  "name": "House Special",
-  "short_name": "House Special",
+  "name": "Recipe Box",
+  "short_name": "Recipe Box",
   "description": "The family kitchen — recipes, groceries, and what's for dinner.",
   "start_url": "./index.html",
   "scope": "./",

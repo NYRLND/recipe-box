@@ -141,7 +141,7 @@ function setTab(tab) {
   if (tab === 'plan') { showView('view-plan'); loadPlan(); }
   if (tab === 'grocery') { showView('view-grocery'); loadGrocery(); }
   qs('#fab-add').hidden = tab !== 'box';
-  const names = { box: 'Recipe Box', discover: 'Discover', plan: 'Meal Plan', grocery: 'Grocery List' };
+  const names = { box: 'Recipes', discover: 'Discover', plan: 'Meal Plan', grocery: 'Grocery List' };
   qs('#topbar-eyebrow').textContent = names[tab] || '';
 }
 
