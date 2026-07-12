@@ -119,7 +119,7 @@ const state = {
   draftMode: 'manual',  // 'manual' | 'import' | 'remix'
   parentForRemix: null,
   groceryItems: [],
-  planDays: [todayISO(0), todayISO(1), todayISO(2)],
+  
   planEntries: {},      // date -> recipe row
   cookRecipe: null,
   cookIndex: 0,
@@ -127,7 +127,26 @@ const state = {
   shareTargetRecipe: null,
 };
 
-/* ================= View routing ================= */
+/* ================= View routing (history-aware: phone back button navigates, doesn't exit) ================= */
+
+let navSuppress = false;
+
+function pushNav(stateObj) {
+  if (!navSuppress) history.pushState(stateObj, '');
+}
+
+window.addEventListener('popstate', (e) => {
+  navSuppress = true;
+  const s = e.state;
+  if (!s || s.v === 'tab') {
+    setTab(s?.tab || 'box');
+  } else if (s.v === 'detail' && state.currentRecipe) {
+    renderRecipeDetail(state.currentRecipe, { preview: !!state.previewMode });
+  } else {
+    setTab('box');
+  }
+  navSuppress = false;
+});
 
 function showView(id) {
   qsa('.view').forEach(v => v.hidden = true);
@@ -141,8 +160,9 @@ function setTab(tab) {
   if (tab === 'plan') { showView('view-plan'); loadPlan(); }
   if (tab === 'grocery') { showView('view-grocery'); loadGrocery(); }
   qs('#fab-add').hidden = tab !== 'box';
-  const names = { box: 'Recipes', discover: 'Discover', plan: 'Meal Plan', grocery: 'Grocery List' };
+  const names = { box: 'Recipe Box', discover: 'Discover', plan: 'Meal Plan', grocery: 'Grocery List' };
   qs('#topbar-eyebrow').textContent = names[tab] || '';
+  if (tab !== 'box') pushNav({ v: 'tab', tab });
 }
 
 /* ================= Boot ================= */
@@ -175,6 +195,7 @@ async function boot() {
 }
 
 function startApp() {
+  history.replaceState({ v: 'tab', tab: 'box' }, '');
   qs('#topbar').hidden = false;
   qs('#tabbar').hidden = false;
   qs('#who-badge').textContent = state.member.name[0];
@@ -240,7 +261,7 @@ function renderTagChips() {
 function drawGrid() {
   const grid = qs('#recipe-grid');
   grid.innerHTML = '';
-  let list = state.recipes;
+  let list = state.recipes.filter(r => r.in_box !== false);
   if (state.activeTag === '__fav') list = list.filter(r => state.favorites.has(r.id));
   else if (state.activeTag) list = list.filter(r => (r.tags || []).includes(state.activeTag));
   if (state.searchTerm) {
@@ -309,6 +330,7 @@ function renderRecipeDetail(r, { preview }) {
   qs('#detail-actions-normal').hidden = preview;
   qs('#detail-actions-normal-2').hidden = preview;
   qs('#btn-delete').hidden = preview;
+  qs('#btn-save-box').hidden = preview || r.in_box !== false;
   qs('#detail-actions-preview').hidden = !preview;
 
   qs('#detail-hero').style.backgroundImage = r.image_url ? `url('${r.image_url}')` : 'none';
@@ -326,14 +348,24 @@ function renderRecipeDetail(r, { preview }) {
   renderDetailSteps();
   renderDetailNotes();
   window.scrollTo(0, 0);
+  pushNav({ v: 'detail' });
 }
 
+qs('#btn-save-box').addEventListener('click', async () => {
+  const r = state.currentRecipe;
+  await supabase.from('recipes').update({ in_box: true }).eq('id', r.id);
+  r.in_box = true;
+  qs('#btn-save-box').hidden = true;
+  toast('It\'s a keeper — saved to your Recipe Box');
+});
+
 qs('#surprise-btn').addEventListener('click', () => {
-  if (!state.recipes.length) return toast('Add some recipes first!');
+  const boxRecipes = state.recipes.filter(r => r.in_box !== false);
+  if (!boxRecipes.length) return toast('Add some recipes first!');
   // favorites count double so the family's loves come up more often
-  const pool = [...state.recipes, ...state.recipes.filter(r => state.favorites.has(r.id))];
+  const pool = [...boxRecipes, ...boxRecipes.filter(r => state.favorites.has(r.id))];
   const pick = pool[Math.floor(Math.random() * pool.length)];
-  toast('Tonight\'s house special…');
+  toast('Tonight\'s pick…');
   setTimeout(() => openDetail(pick.id), 400);
 });
 
@@ -408,7 +440,7 @@ function memberNameFor(r) {
   return m ? m.name : 'A note';
 }
 
-qs('#detail-back').addEventListener('click', () => setTab('box'));
+qs('#detail-back').addEventListener('click', () => history.back());
 qs('#serv-plus').addEventListener('click', () => { state.currentServings++; qs('#serv-value').textContent = state.currentServings; renderDetailIngredients(); });
 qs('#serv-minus').addEventListener('click', () => { if (state.currentServings > 1) state.currentServings--; qs('#serv-value').textContent = state.currentServings; renderDetailIngredients(); });
 
@@ -553,30 +585,10 @@ qs('#share-copy').addEventListener('click', async () => {
   closeSheet('share-sheet', 'sheet-backdrop');
 });
 
-/* ---- Add to plan ---- */
-qs('#btn-plan').addEventListener('click', () => {
-  openSheet('plan-sheet', 'plan-sheet-backdrop');
-  const box = qs('#plan-sheet-days');
-  box.innerHTML = '';
-  state.planDays.forEach(day => {
-    const row = el('button', 'day-slot', `<div><div style="font-weight:700;">${formatDayLabel(day)}</div><div style="font-size:0.75rem;color:var(--color-ink-faint);">${formatDateSub(day)}</div></div>`);
-    row.style.width = '100%';
-    row.style.marginBottom = '10px';
-    row.addEventListener('click', async () => {
-      await supabase.from('meal_plan').delete().eq('planned_date', day);
-      await supabase.from('meal_plan').insert({ recipe_id: state.currentRecipe.id, planned_date: day });
-      toast(`Added to ${formatDayLabel(day)}`);
-      closeSheet('plan-sheet', 'plan-sheet-backdrop');
-    });
-    box.appendChild(row);
-  });
-});
-qs('#plan-sheet-backdrop').addEventListener('click', () => closeSheet('plan-sheet', 'plan-sheet-backdrop'));
-
 /* ================= Import ================= */
 
-qs('#fab-add').addEventListener('click', () => { showView('view-import'); qs('#import-status').hidden = true; qs('#import-url').value = ''; });
-qs('#import-back').addEventListener('click', () => setTab('box'));
+qs('#fab-add').addEventListener('click', () => { showView('view-import'); pushNav({ v: 'import' }); qs('#import-status').hidden = true; qs('#import-url').value = ''; });
+qs('#import-back').addEventListener('click', () => history.back());
 qs('#import-manual').addEventListener('click', () => {
   state.draft = { title: '', source: '', source_url: '', image_url: '', servings: 4, prep_time: '', cook_time: '', ingredients: [], steps: [], notes: '' };
   state.draftMode = 'manual';
@@ -595,7 +607,7 @@ async function callImportFn(payload) {
   return data;
 }
 
-async function importFromUrl(url, statusEl) {
+async function importFromUrl(url, statusEl, { open = true } = {}) {
   if (statusEl) { statusEl.hidden = false; statusEl.innerHTML = `<div class="spinner"></div> Fetching and reading the recipe…`; }
   const data = await callImportFn({ url });
   state.draft = {
@@ -614,7 +626,20 @@ async function importFromUrl(url, statusEl) {
   state.draftMode = 'import';
   state.parentForRemix = null;
   if (statusEl) statusEl.hidden = true;
-  openDraftPreview();
+  if (open) openDraftPreview();
+  return state.draft;
+}
+
+async function insertDraftAsRecipe(d, inBox) {
+  const { data, error } = await supabase.from('recipes').insert({
+    title: d.title, source: d.source, source_url: d.source_url || null, image_url: d.image_url,
+    servings: d.servings || 4, prep_time: d.prep_time, cook_time: d.cook_time,
+    ingredients: d.ingredients || [], steps: d.steps || [], tags: d.tags || [],
+    notes: d.notes || '', created_by: state.member.id, parent_recipe_id: state.parentForRemix,
+    in_box: inBox,
+  }).select().single();
+  if (error) throw new Error('save failed');
+  return data;
 }
 
 qs('#import-go').addEventListener('click', async () => {
@@ -632,8 +657,46 @@ qs('#import-go').addEventListener('click', async () => {
 
 /* ================= Discover ================= */
 
-const DISCOVER_CATS = ['Chicken','Pasta','30-Minute','Seafood','Beef','Vegetarian','Soup','Salad','Slow Cooker','Dessert','Breakfast'];
-const disc = { mode: 'feed', query: '', page: 1, busy: false, done: false, started: false };
+const DISCOVER_CATS = ['Chicken','Pasta','30-Minute','Seafood','Beef','Pork','Vegetarian','Soup','Salad','Slow Cooker','Casserole','Tacos','Stir Fry','Dessert','Breakfast'];
+const disc = {
+  mode: 'feed', query: '', page: 1, busy: false, done: false, started: false,
+  seed: Math.floor(Math.random() * 200),   // per-session: dig into a different slice of each archive
+  sources: [],                              // selected hosts; empty = all
+  allSites: [],
+  seenUrls: new Set(),
+};
+
+// Learn the family's taste from the recipe box: frequent meaningful words
+// in saved titles/tags become search terms mixed into the feed.
+const STOPWORDS = new Set(['with','and','the','best','easy','quick','recipe','recipes','from','style','baked','simple','homemade','classic','perfect','minute','version','skillet','sheet','pan','one','pot']);
+function learnedInterests() {
+  const counts = {};
+  state.recipes.filter(r => r.in_box !== false).forEach(r => {
+    const words = (r.title + ' ' + (r.tags || []).join(' ')).toLowerCase().split(/[^a-z]+/);
+    words.forEach(w => { if (w.length > 3 && !STOPWORDS.has(w)) counts[w] = (counts[w] || 0) + 1; });
+  });
+  const ranked = Object.entries(counts).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).map(([w]) => w).slice(0, 6);
+  // pick up to 2 at random each session so the mix rotates
+  const picks = [];
+  while (ranked.length && picks.length < 2) picks.push(ranked.splice(Math.floor(Math.random() * ranked.length), 1)[0]);
+  return picks;
+}
+
+function addLongPress(elem, onLong) {
+  let timer = null, fired = false, sx = 0, sy = 0;
+  elem.addEventListener('pointerdown', (e) => {
+    fired = false; sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => { fired = true; if (navigator.vibrate) navigator.vibrate(15); onLong(); }, 500);
+  });
+  const cancel = () => clearTimeout(timer);
+  elem.addEventListener('pointermove', (e) => { if (Math.hypot(e.clientX - sx, e.clientY - sy) > 12) cancel(); });
+  elem.addEventListener('pointerup', cancel);
+  elem.addEventListener('pointercancel', cancel);
+  elem.addEventListener('contextmenu', (e) => e.preventDefault());
+  elem.addEventListener('click', (e) => { if (fired) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+}
+
+let discActionTarget = null;
 
 function discoverCard(r) {
   const card = el('div', 'recipe-card');
@@ -657,22 +720,96 @@ function discoverCard(r) {
         : `Couldn't import that one (${err.message}) — try another.`;
     }
   });
+  addLongPress(card, () => {
+    discActionTarget = r;
+    qs('#disc-action-title').textContent = r.title;
+    qs('#disc-action-source').textContent = r.source || '';
+    openSheet('disc-action-sheet', 'disc-action-backdrop');
+  });
   return card;
 }
 
-function renderDiscoverChips() {
-  const row = qs('#discover-chips');
-  if (row.children.length) return;
-  DISCOVER_CATS.forEach(cat => {
-    const c = el('button', 'chip', cat);
-    c.addEventListener('click', () => {
-      qsa('#discover-chips .chip').forEach(x => x.classList.toggle('active', x === c && !c.classList.contains('active')));
-      qs('#discover-input').value = c.classList.contains('active') ? cat : '';
-      if (c.classList.contains('active')) runDiscoverSearch(); else resetToFeed();
-    });
-    row.appendChild(c);
-  });
+qs('#disc-action-backdrop').addEventListener('click', () => closeSheet('disc-action-sheet', 'disc-action-backdrop'));
+
+qs('#disc-act-open').addEventListener('click', () => {
+  closeSheet('disc-action-sheet', 'disc-action-backdrop');
+  if (discActionTarget) importFromUrl(discActionTarget.url, qs('#discover-status')).catch(() => toast('Could not open that one'));
+});
+
+qs('#disc-act-save').addEventListener('click', async () => {
+  closeSheet('disc-action-sheet', 'disc-action-backdrop');
+  if (!discActionTarget) return;
+  toast('Saving…');
+  try {
+    const d = await importFromUrl(discActionTarget.url, null, { open: false });
+    d.source = discActionTarget.source || d.source;
+    await insertDraftAsRecipe(d, true);
+    toast('Saved to your Recipe Box');
+  } catch (e) { toast('Could not import that one'); }
+});
+
+qs('#disc-act-plan').addEventListener('click', async () => {
+  closeSheet('disc-action-sheet', 'disc-action-backdrop');
+  if (!discActionTarget) return;
+  toast('Fetching recipe…');
+  try {
+    const d = await importFromUrl(discActionTarget.url, null, { open: false });
+    d.source = discActionTarget.source || d.source;
+    const rec = await insertDraftAsRecipe(d, false);   // tryout: on the plan, not in the box
+    openPlanPickerFor(rec, { tryout: true });
+  } catch (e) { toast('Could not import that one'); }
+});
+
+/* ---- filter sheets ---- */
+
+async function loadSiteList() {
+  if (disc.allSites.length) return;
+  try { disc.allSites = (await callImportFn({ sites: true })).sites || []; } catch (e) { disc.allSites = []; }
 }
+
+qs('#filter-sources-btn').addEventListener('click', async () => {
+  await loadSiteList();
+  const list = qs('#sources-chip-list');
+  list.innerHTML = '';
+  disc.allSites.forEach(s => {
+    const c = el('button', 'chip' + (disc.sources.includes(s.host) ? ' active' : ''), s.name);
+    c.dataset.host = s.host;
+    c.addEventListener('click', () => c.classList.toggle('active'));
+    list.appendChild(c);
+  });
+  openSheet('sources-sheet', 'sources-sheet-backdrop');
+});
+qs('#sources-sheet-backdrop').addEventListener('click', () => closeSheet('sources-sheet', 'sources-sheet-backdrop'));
+qs('#sources-clear').addEventListener('click', () => qsa('#sources-chip-list .chip').forEach(c => c.classList.remove('active')));
+qs('#sources-apply').addEventListener('click', () => {
+  disc.sources = qsa('#sources-chip-list .chip.active').map(c => c.dataset.host);
+  const btn = qs('#filter-sources-btn');
+  btn.textContent = disc.sources.length ? `Sources · ${disc.sources.length} ▾` : 'Sources · All ▾';
+  btn.classList.toggle('active', !!disc.sources.length);
+  closeSheet('sources-sheet', 'sources-sheet-backdrop');
+  disc.query ? runDiscoverSearch(true) : resetToFeed();
+});
+
+qs('#filter-cat-btn').addEventListener('click', () => {
+  const list = qs('#cat-chip-list');
+  if (!list.children.length) {
+    DISCOVER_CATS.forEach(cat => {
+      const c = el('button', 'chip', cat);
+      c.addEventListener('click', () => {
+        closeSheet('cat-sheet', 'cat-sheet-backdrop');
+        qs('#discover-input').value = cat;
+        qs('#filter-cat-btn').textContent = `${cat} ▾`;
+        qs('#filter-cat-btn').classList.add('active');
+        runDiscoverSearch(true);
+      });
+      list.appendChild(c);
+    });
+  }
+  openSheet('cat-sheet', 'cat-sheet-backdrop');
+});
+qs('#cat-sheet-backdrop').addEventListener('click', () => closeSheet('cat-sheet', 'cat-sheet-backdrop'));
+
+/* ---- fetching ---- */
 
 async function fetchDiscoverPage() {
   if (disc.busy || disc.done) return;
@@ -680,9 +817,13 @@ async function fetchDiscoverPage() {
   const more = qs('#discover-more-status');
   if (disc.page > 1) more.hidden = false;
   try {
-    const payload = disc.mode === 'search' ? { search: disc.query, page: disc.page } : { feed: true, page: disc.page };
-    const data = await callImportFn(payload);
-    const results = data.results || [];
+    const base = disc.mode === 'search'
+      ? { search: disc.query, page: disc.page }
+      : { feed: true, page: disc.page, seed: disc.seed, interests: learnedInterests() };
+    if (disc.sources.length) base.sources = disc.sources;
+    const data = await callImportFn(base);
+    const results = (data.results || []).filter(r => !disc.seenUrls.has(r.url));
+    results.forEach(r => disc.seenUrls.add(r.url));
     const box = disc.mode === 'search' ? qs('#discover-results') : qs('#discover-feed');
     results.forEach(r => box.appendChild(discoverCard(r)));
     if (disc.page === 1) {
@@ -694,7 +835,7 @@ async function fetchDiscoverPage() {
         s.textContent = `No results for "${disc.query}" — try a simpler term, like one main ingredient.`;
       }
     }
-    if (!results.length) disc.done = true;
+    if (!results.length && !(data.results || []).length) disc.done = true;
     disc.page++;
   } catch (err) {
     if (disc.page === 1) {
@@ -711,39 +852,43 @@ async function fetchDiscoverPage() {
 
 function resetDiscover(mode, query) {
   disc.mode = mode; disc.query = query || ''; disc.page = 1; disc.done = false; disc.busy = false;
+  disc.seenUrls.clear();
   qs('#discover-results').innerHTML = '';
   qs('#discover-results-label').hidden = true;
   qs('#discover-status').hidden = true;
   if (mode === 'search') {
     qs('#discover-feed').innerHTML = '';
     qs('#discover-feed-label').hidden = true;
+  } else {
+    qs('#filter-cat-btn').textContent = 'Category ▾';
+    qs('#filter-cat-btn').classList.remove('active');
   }
 }
 
 function resetToFeed() {
   resetDiscover('feed');
   qs('#discover-feed').innerHTML = '';
+  qs('#discover-feed-label').textContent = learnedInterests().length ? 'Inspired by your recipe box' : 'Fresh from your favorite sites';
   const s = qs('#discover-status');
   s.hidden = false;
-  s.innerHTML = `<div class="spinner"></div> Loading fresh recipes…`;
-  fetchDiscoverPage().then(() => { if (!disc.done || qs('#discover-feed').children.length) s.hidden = true; });
+  s.innerHTML = `<div class="spinner"></div> Finding tonight's contenders…`;
+  fetchDiscoverPage().then(() => { if (qs('#discover-feed').children.length) s.hidden = true; });
 }
 
 async function initDiscover() {
-  renderDiscoverChips();
   if (disc.started) return;
   disc.started = true;
   resetToFeed();
-  // infinite scroll
   const sentinel = qs('#discover-sentinel');
   new IntersectionObserver((entries) => {
     if (entries[0].isIntersecting && !qs('#view-discover').hidden) fetchDiscoverPage();
   }, { rootMargin: '400px' }).observe(sentinel);
 }
 
-async function runDiscoverSearch() {
+async function runDiscoverSearch(keepCat) {
   const q = qs('#discover-input').value.trim();
   if (!q) return;
+  if (!keepCat) { qs('#filter-cat-btn').textContent = 'Category ▾'; qs('#filter-cat-btn').classList.remove('active'); }
   resetDiscover('search', q);
   const status = qs('#discover-status');
   status.hidden = false;
@@ -752,9 +897,9 @@ async function runDiscoverSearch() {
   if (qs('#discover-results').children.length) status.hidden = true;
 }
 
-qs('#discover-go').addEventListener('click', runDiscoverSearch);
+qs('#discover-go').addEventListener('click', () => runDiscoverSearch());
 qs('#discover-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.target.blur(); runDiscoverSearch(); } });
-qs('#discover-paste-link').addEventListener('click', () => { showView('view-import'); qs('#import-status').hidden = true; });
+qs('#discover-paste-link').addEventListener('click', () => { showView('view-import'); pushNav({ v: 'import' }); qs('#import-status').hidden = true; });
 
 /* ================= Editor (import preview / manual / remix) ================= */
 
@@ -779,6 +924,7 @@ function openEditor() {
   if (!d.steps?.length) addEditorRow(stepBox, '', true);
 
   showView('view-editor');
+  pushNav({ v: 'editor' });
 }
 
 function addEditorRow(container, value, multiline) {
@@ -903,31 +1049,83 @@ qs('#grocery-add-btn').addEventListener('click', async () => {
 });
 qs('#grocery-add-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') qs('#grocery-add-btn').click(); });
 
-/* ================= Meal Plan (flexible 3-day) ================= */
+/* ================= Meal Plan (rolling days + history) ================= */
+
+const plan = { startOffset: 0, endOffset: 4 };   // today .. today+4 by default
+
+function visiblePlanDays() {
+  const days = [];
+  for (let o = plan.startOffset; o <= plan.endOffset; o++) days.push(todayISO(o));
+  return days;
+}
 
 async function loadPlan() {
-  const { data } = await supabase.from('meal_plan').select('*, recipes(*)').in('planned_date', state.planDays);
+  const days = visiblePlanDays();
+  const { data } = await supabase.from('meal_plan').select('*, recipes(*)')
+    .gte('planned_date', days[0]).lte('planned_date', days[days.length - 1]);
   state.planEntries = {};
   (data || []).forEach(row => { state.planEntries[row.planned_date] = row; });
   drawPlan();
 }
 
+qs('#plan-earlier').addEventListener('click', () => { plan.startOffset -= 7; loadPlan(); });
+
+async function moveEntryToDay(entry, targetDay) {
+  const existing = state.planEntries[targetDay];
+  if (existing && existing.id !== entry.id) {
+    await supabase.from('meal_plan').update({ planned_date: entry.planned_date }).eq('id', existing.id);
+  }
+  await supabase.from('meal_plan').update({ planned_date: targetDay }).eq('id', entry.id);
+  toast(`Moved to ${formatDayLabel(targetDay)}`);
+  loadPlan();
+}
+
+// Shared picker: assigns a recipe to a day, or moves an existing plan entry.
+function openPlanPickerFor(recipe, { tryout = false, moveEntry = null } = {}) {
+  const box = qs('#plan-sheet-days');
+  box.innerHTML = '';
+  const days = [];
+  for (let o = 0; o <= Math.max(plan.endOffset, 6); o++) days.push(todayISO(o));
+  days.forEach(day => {
+    const occupied = state.planEntries[day];
+    const row = el('button', 'day-slot', `<div><div style="font-weight:700;">${formatDayLabel(day)}</div><div style="font-size:0.75rem;color:var(--color-ink-faint);">${formatDateSub(day)}${occupied ? ' · ' + occupied.recipes.title : ''}</div></div>`);
+    row.style.width = '100%';
+    row.style.marginBottom = '10px';
+    row.addEventListener('click', async () => {
+      closeSheet('plan-sheet', 'plan-sheet-backdrop');
+      if (moveEntry) return moveEntryToDay(moveEntry, day);
+      await supabase.from('meal_plan').delete().eq('planned_date', day);
+      await supabase.from('meal_plan').insert({ recipe_id: recipe.id, planned_date: day });
+      toast(tryout ? `On the plan for ${formatDayLabel(day)} — save it to the box if it's a keeper` : `Added to ${formatDayLabel(day)}`);
+      if (!qs('#view-plan').hidden) loadPlan();
+    });
+    box.appendChild(row);
+  });
+  openSheet('plan-sheet', 'plan-sheet-backdrop');
+}
+
+qs('#btn-plan').addEventListener('click', () => openPlanPickerFor(state.currentRecipe));
+qs('#plan-sheet-backdrop').addEventListener('click', () => closeSheet('plan-sheet', 'plan-sheet-backdrop'));
+
 function drawPlan() {
   const strip = qs('#day-strip');
   strip.innerHTML = '';
-  state.planDays.forEach(day => {
-    const card = el('div', 'day-card');
+  const today = todayISO();
+  visiblePlanDays().forEach(day => {
+    const card = el('div', 'day-card' + (day < today ? ' past' : '') + (day === today ? ' today-card' : ''));
     card.innerHTML = `<div class="day-label">${formatDayLabel(day)}</div><div class="date-label">${formatDateSub(day)}</div>`;
     const entry = state.planEntries[day];
     const slot = el('div', 'day-slot' + (entry ? ' filled' : ''));
     if (entry) {
-      slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;">${entry.recipes.title}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to open</div></div><button class="slot-remove" title="Remove">✕</button>`;
+      const tryout = entry.recipes.in_box === false;
+      slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;">${entry.recipes.title}${tryout ? ' <span style="font-size:0.62rem;color:var(--color-gold);font-weight:700;">TRYING IT</span>' : ''}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to open · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
       slot.querySelector('div').addEventListener('click', () => openDetail(entry.recipes.id));
       slot.querySelector('.slot-remove').addEventListener('click', async (e) => {
         e.stopPropagation();
         await supabase.from('meal_plan').delete().eq('id', entry.id);
         loadPlan();
       });
+      addLongPress(slot, () => openPlanPickerFor(null, { moveEntry: entry }));
     } else {
       slot.innerHTML = `<span class="plus">+ Choose a recipe</span>`;
       slot.addEventListener('click', () => { setTab('box'); toast('Pick a recipe, then "Add to plan"'); });
@@ -936,10 +1134,7 @@ function drawPlan() {
     strip.appendChild(card);
   });
   const addDay = el('button', 'add-row-btn', '+ Plan another day');
-  addDay.addEventListener('click', () => {
-    state.planDays.push(todayISO(state.planDays.length));
-    loadPlan();
-  });
+  addDay.addEventListener('click', () => { plan.endOffset++; loadPlan(); });
   strip.appendChild(addDay);
 }
 

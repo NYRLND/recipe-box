@@ -69,3 +69,6 @@ create policy "allow all" on recipes for all using (true) with check (true);
 create policy "allow all" on favorites for all using (true) with check (true);
 create policy "allow all" on grocery_items for all using (true) with check (true);
 create policy "allow all" on meal_plan for all using (true) with check (true);
+
+-- v4: tryout recipes (planned from Discover but not yet saved to the box)
+alter table recipes add column if not exists in_box boolean not null default true;

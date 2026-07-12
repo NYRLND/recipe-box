@@ -17,9 +17,16 @@ const corsHeaders = {
 const SITES = [
   { name: "Damn Delicious", host: "damndelicious.net" },
   { name: "Once Upon a Chef", host: "www.onceuponachef.com" },
+  { name: "RecipeTin Eats", host: "www.recipetineats.com" },
+  { name: "Gimme Some Oven", host: "www.gimmesomeoven.com" },
+  { name: "Cafe Delites", host: "cafedelites.com" },
+  { name: "The Recipe Critic", host: "therecipecritic.com" },
+  { name: "Natasha's Kitchen", host: "natashaskitchen.com" },
+  { name: "Dinner at the Zoo", host: "www.dinneratthezoo.com" },
   { name: "Budget Bytes", host: "www.budgetbytes.com" },
   { name: "Pinch of Yum", host: "pinchofyum.com" },
   { name: "Half Baked Harvest", host: "www.halfbakedharvest.com" },
+  { name: "Sally's Baking Addiction", host: "sallysbakingaddiction.com" },
 ];
 
 const UA = { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", "Accept": "text/html,application/json" };
@@ -212,41 +219,79 @@ async function nytSearch(query: string, limit: number) {
   return results;
 }
 
-async function searchSites(query: string, page: number) {
-  const perSite = 4;
-  const tasks: Promise<any[]>[] = SITES.map(async (site) => {
+function activeSites(sources?: string[]) {
+  if (!Array.isArray(sources) || !sources.length) return SITES;
+  const set = new Set(sources);
+  const filtered = SITES.filter((s) => set.has(s.host));
+  return filtered.length ? filtered : SITES;
+}
+
+async function searchSites(query: string, page: number, sources?: string[]) {
+  const sites = activeSites(sources);
+  const perSite = sites.length <= 3 ? 8 : 4;
+  const tasks: Promise<any[]>[] = sites.map(async (site) => {
     try { return await wpSearch(site, query, perSite, page); }
     catch (_e) { return page === 1 ? await htmlSearch(site, query, perSite) : []; }
   });
-  // NYT only on the first page (its search page isn't paginated the same way)
-  if (page === 1) tasks.push(nytSearch(query, 4).catch(() => []));
+  // NYT only on the first page, and only when not filtering to specific sources
+  if (page === 1 && (!sources || !sources.length)) tasks.push(nytSearch(query, 4).catch(() => []));
   const settled = await Promise.allSettled(tasks);
   const results: any[] = [];
   const lists = settled.map((s) => (s.status === "fulfilled" ? s.value : []));
-  for (let i = 0; i < perSite; i++) for (const list of lists) if (list[i]) results.push(list[i]);
+  for (let i = 0; i < 8; i++) for (const list of lists) if (list[i]) results.push(list[i]);
   return results;
 }
 
-async function latestFeed(page: number) {
-  const settled = await Promise.allSettled(
-    SITES.map(async (site) => {
-      const url = `https://${site.host}/wp-json/wp/v2/posts?per_page=3&page=${page}&_embed=wp:featuredmedia`;
-      const resp = await fetch(url, { headers: UA });
-      if (!resp.ok) throw new Error(`${resp.status}`);
-      const posts = await resp.json();
-      return posts.map((p: any) => ({
-        title: decodeEntities(p.title?.rendered || ""),
-        url: p.link,
-        image: p._embedded?.["wp:featuredmedia"]?.[0]?.media_details?.sizes?.medium_large?.source_url
-            || p._embedded?.["wp:featuredmedia"]?.[0]?.source_url || "",
-        source: site.name,
-      })).filter((r: any) => r.title && r.url && !looksLikeRoundup(r.title, r.url));
-    })
-  );
-  const results: any[] = [];
+async function wpLatest(site: { name: string; host: string }, perPage: number, offset: number) {
+  const url = `https://${site.host}/wp-json/wp/v2/posts?per_page=${perPage}&offset=${offset}&_embed=wp:featuredmedia`;
+  const resp = await fetch(url, { headers: UA });
+  if (!resp.ok) throw new Error(`${resp.status}`);
+  const posts = await resp.json();
+  if (!Array.isArray(posts)) throw new Error("bad response");
+  return posts.map((p: any) => ({
+    title: decodeEntities(p.title?.rendered || ""),
+    url: p.link,
+    image: p._embedded?.["wp:featuredmedia"]?.[0]?.media_details?.sizes?.medium_large?.source_url
+        || p._embedded?.["wp:featuredmedia"]?.[0]?.source_url || "",
+    source: site.name,
+  })).filter((r: any) => r.title && r.url && !looksLikeRoundup(r.title, r.url));
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Discovery feed: pulls DEEP into each site's archive using a per-session
+// random seed offset (so the same recipes don't surface every time), and
+// mixes in searches for the family's learned interests from their recipe box.
+async function latestFeed(page: number, seed: number, sources?: string[], interests?: string[]) {
+  const sites = activeSites(sources);
+  const per = 3;
+  const tasks: Promise<any[]>[] = sites.map(async (site) => {
+    const offset = seed + (page - 1) * per;
+    try { return await wpLatest(site, per, offset); }
+    catch (_e) {
+      try { return await wpLatest(site, per, (page - 1) * per); } // site archive shallower than the seed — fall back
+      catch (_e2) { return []; }
+    }
+  });
+  // interest mixing: a couple of taste-based searches woven into the feed
+  const terms = (interests || []).filter((t) => typeof t === "string" && t.length > 2).slice(0, 3);
+  for (const term of terms) {
+    const site = sites[Math.floor(Math.random() * sites.length)];
+    tasks.push(wpSearch(site, term, 3, 1 + (page - 1) % 3).catch(() => []));
+  }
+  const settled = await Promise.allSettled(tasks);
   const lists = settled.map((s) => (s.status === "fulfilled" ? s.value : []));
-  for (let i = 0; i < 3; i++) for (const list of lists) if (list[i]) results.push(list[i]);
-  return results;
+  const results: any[] = [];
+  for (let i = 0; i < per; i++) for (const list of lists) if (list[i]) results.push(list[i]);
+  // de-dup by url, then shuffle so ordering varies
+  const seen = new Set<string>();
+  return shuffle(results.filter((r) => !seen.has(r.url) && seen.add(r.url)));
 }
 
 /* ---------------- handler ---------------- */
@@ -258,11 +303,13 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const page = Math.max(1, Math.min(10, parseInt(body.page) || 1));
+    const page = Math.max(1, Math.min(20, parseInt(body.page) || 1));
+    const seed = Math.max(0, Math.min(300, parseInt(body.seed) || 0));
 
     if (body.url) return json(await importRecipe(String(body.url)));
-    if (body.search) return json({ results: await searchSites(String(body.search).slice(0, 80), page) });
-    if (body.feed) return json({ results: await latestFeed(page) });
+    if (body.sites) return json({ sites: SITES });
+    if (body.search) return json({ results: await searchSites(String(body.search).slice(0, 80), page, body.sources) });
+    if (body.feed) return json({ results: await latestFeed(page, seed, body.sources, body.interests) });
 
     return json({ error: "Send { url }, { search }, or { feed: true }" }, 400);
   } catch (err) {

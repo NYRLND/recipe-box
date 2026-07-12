@@ -102,6 +102,7 @@
       <button class="btn btn-secondary" id="btn-share">Share recipe</button>
       <button class="btn btn-secondary" id="btn-plan">Add to plan</button>
     </div>
+    <button class="btn btn-gold" id="btn-save-box" style="width:100%;margin-top:16px;" hidden>☆ Save to Recipe Box</button>
     <button class="btn btn-ghost" id="btn-delete" style="width:100%;margin-top:16px;color:var(--color-danger);">Remove from recipe box</button>
 
     <!-- Preview mode (unsaved import): magazine read first, edit only if wanted -->
@@ -185,7 +186,10 @@
       <input class="search-input" id="discover-input" placeholder="Search recipes… e.g. chicken tikka" enterkeyhint="search">
       <button class="btn btn-primary" id="discover-go" style="width:auto;padding:12px 18px;">Search</button>
     </div>
-    <div class="chip-row" id="discover-chips"></div>
+    <div class="filter-bar">
+      <button class="filter-btn" id="filter-sources-btn">Sources · All ▾</button>
+      <button class="filter-btn" id="filter-cat-btn">Category ▾</button>
+    </div>
     <div class="import-status" id="discover-status" hidden></div>
     <div class="section-label" id="discover-results-label" hidden>Results</div>
     <div class="recipe-grid" id="discover-results"></div>
@@ -212,7 +216,8 @@
   <!-- MEAL PLAN (flexible 3-day) -->
   <main class="view" id="view-plan" hidden>
     <h2>Next up</h2>
-    <p style="color:var(--color-ink-soft);font-size:0.88rem;margin-top:4px;">Plan the next three days — no full-week pressure.</p>
+    <p style="color:var(--color-ink-soft);font-size:0.88rem;margin-top:4px;">Today and the days ahead. Long-press a planned meal to move it.</p>
+    <button class="btn btn-ghost" id="plan-earlier" style="width:100%;margin-top:10px;">↑ Show earlier days</button>
     <div class="day-strip" id="day-strip"></div>
   </main>
 
@@ -220,7 +225,7 @@
   <nav class="tabbar" id="tabbar" hidden>
     <button class="tab active" data-tab="box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h16M4 8l1.5 11a1 1 0 001 .9h11a1 1 0 001-.9L20 8M9 8V6a3 3 0 016 0v2"/></svg>
-      Recipes
+      Recipe Box
     </button>
     <button class="tab" data-tab="discover">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -272,6 +277,38 @@
   <div class="sheet-handle"></div>
   <h3 style="margin-bottom:14px;">Add to which day?</h3>
   <div id="plan-sheet-days"></div>
+</div>
+
+<!-- SOURCE FILTER SHEET -->
+<div class="sheet-backdrop" id="sources-sheet-backdrop"></div>
+<div class="sheet" id="sources-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:4px;">Browse which sources?</h3>
+  <p style="color:var(--color-ink-soft);font-size:0.85rem;margin-bottom:12px;">Pick a few of her favorites, or leave all on.</p>
+  <div class="chip-row" id="sources-chip-list" style="flex-wrap:wrap;overflow:visible;"></div>
+  <div class="action-row">
+    <button class="btn btn-secondary" id="sources-clear">All sources</button>
+    <button class="btn btn-primary" id="sources-apply">Apply</button>
+  </div>
+</div>
+
+<!-- CATEGORY SHEET -->
+<div class="sheet-backdrop" id="cat-sheet-backdrop"></div>
+<div class="sheet" id="cat-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:12px;">Browse a category</h3>
+  <div class="chip-row" id="cat-chip-list" style="flex-wrap:wrap;overflow:visible;"></div>
+</div>
+
+<!-- DISCOVER LONG-PRESS ACTIONS -->
+<div class="sheet-backdrop" id="disc-action-backdrop"></div>
+<div class="sheet" id="disc-action-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:4px;" id="disc-action-title">Recipe</h3>
+  <p style="color:var(--color-ink-soft);font-size:0.82rem;margin-bottom:14px;" id="disc-action-source"></p>
+  <button class="btn btn-secondary" id="disc-act-plan" style="width:100%;margin-bottom:10px;justify-content:flex-start;">📅 Add to plan (try it out)</button>
+  <button class="btn btn-secondary" id="disc-act-save" style="width:100%;margin-bottom:10px;justify-content:flex-start;">☆ Save to Recipe Box</button>
+  <button class="btn btn-secondary" id="disc-act-open" style="width:100%;justify-content:flex-start;">👀 Preview recipe</button>
 </div>
 
 <!-- POST-COOK NOTE SHEET -->
