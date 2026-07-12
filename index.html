@@ -173,6 +173,20 @@
     <button class="btn btn-primary" id="ed-save" style="margin-top:24px;">Save to recipe box</button>
   </main>
 
+  <!-- DISCOVER -->
+  <main class="view" id="view-discover" hidden>
+    <div class="search-row">
+      <input class="search-input" id="discover-input" placeholder="Search recipes… e.g. chicken tikka" enterkeyhint="search">
+      <button class="btn btn-primary" id="discover-go" style="width:auto;padding:12px 18px;">Search</button>
+    </div>
+    <div class="import-status" id="discover-status" hidden></div>
+    <div class="section-label" id="discover-results-label" hidden>Results</div>
+    <div class="recipe-grid" id="discover-results"></div>
+    <div class="section-label" id="discover-feed-label" hidden>Fresh from your favorite sites</div>
+    <div class="recipe-grid" id="discover-feed"></div>
+    <button class="btn btn-ghost" id="discover-paste-link" style="margin-top:22px;width:100%;">Have a specific link? Paste it instead →</button>
+  </main>
+
   <!-- GROCERY LIST -->
   <main class="view" id="view-grocery" hidden>
     <div id="grocery-content"></div>
@@ -198,6 +212,10 @@
     <button class="tab active" data-tab="box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h16M4 8l1.5 11a1 1 0 001 .9h11a1 1 0 001-.9L20 8M9 8V6a3 3 0 016 0v2"/></svg>
       Recipe Box
+    </button>
+    <button class="tab" data-tab="discover">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      Discover
     </button>
     <button class="tab" data-tab="plan">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>

@@ -137,10 +137,12 @@ function showView(id) {
 function setTab(tab) {
   qsa('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   if (tab === 'box') { showView('view-box'); renderBox(); }
+  if (tab === 'discover') { showView('view-discover'); initDiscover(); }
   if (tab === 'plan') { showView('view-plan'); loadPlan(); }
   if (tab === 'grocery') { showView('view-grocery'); loadGrocery(); }
   qs('#fab-add').hidden = tab !== 'box';
-  qs('#topbar-eyebrow').textContent = tab === 'box' ? 'Recipe Box' : tab === 'plan' ? 'Meal Plan' : 'Grocery List';
+  const names = { box: 'Recipe Box', discover: 'Discover', plan: 'Meal Plan', grocery: 'Grocery List' };
+  qs('#topbar-eyebrow').textContent = names[tab] || '';
 }
 
 /* ================= Boot ================= */
@@ -503,40 +505,124 @@ qs('#import-manual').addEventListener('click', () => {
   openEditor();
 });
 
+async function callImportFn(payload) {
+  const resp = await fetch(IMPORT_RECIPE_FN, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await resp.json();
+  if (!resp.ok || data.error) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function importFromUrl(url, statusEl) {
+  if (statusEl) { statusEl.hidden = false; statusEl.innerHTML = `<div class="spinner"></div> Fetching and reading the recipe…`; }
+  const data = await callImportFn({ url });
+  state.draft = {
+    title: data.title || '',
+    source: data.source || new URL(url).hostname.replace('www.', ''),
+    source_url: url,
+    image_url: data.image_url || '',
+    servings: data.servings || 4,
+    prep_time: data.prep_time || '',
+    cook_time: data.cook_time || '',
+    ingredients: (data.ingredients || []).map(parseIngredientLine),
+    steps: data.steps || [],
+    tags: data.tags || [],
+    notes: '',
+  };
+  state.draftMode = 'import';
+  state.parentForRemix = null;
+  if (statusEl) statusEl.hidden = true;
+  openEditor();
+}
+
 qs('#import-go').addEventListener('click', async () => {
   const url = qs('#import-url').value.trim();
   if (!url) return;
   const status = qs('#import-status');
-  status.hidden = false;
-  status.innerHTML = `<div class="spinner"></div> Fetching and reading the recipe…`;
   try {
-    const resp = await fetch(IMPORT_RECIPE_FN, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-      body: JSON.stringify({ url }),
-    });
-    const data = await resp.json();
-    if (!resp.ok || data.error) throw new Error(data.error || 'Could not read that page');
-    state.draft = {
-      title: data.title || '',
-      source: data.source || new URL(url).hostname.replace('www.', ''),
-      source_url: url,
-      image_url: data.image_url || '',
-      servings: data.servings || 4,
-      prep_time: data.prep_time || '',
-      cook_time: data.cook_time || '',
-      ingredients: (data.ingredients || []).map(parseIngredientLine),
-      steps: data.steps || [],
-      notes: '',
-    };
-    state.draftMode = 'import';
-    state.parentForRemix = null;
-    openEditor();
+    await importFromUrl(url, status);
   } catch (err) {
+    status.hidden = false;
     status.innerHTML = `Couldn't auto-import that link (${err.message}). You can still <button class="btn-ghost" id="fallback-manual" style="padding:0;">paste the ingredients and steps by hand</button>.`;
     qs('#fallback-manual')?.addEventListener('click', () => qs('#import-manual').click());
   }
 });
+
+/* ================= Discover ================= */
+
+let feedLoaded = false;
+
+function discoverCard(r) {
+  const card = el('div', 'recipe-card');
+  const thumb = el('div', 'thumb');
+  if (r.image) thumb.style.backgroundImage = `url('${r.image}')`;
+  else thumb.textContent = r.title[0] || '?';
+  card.appendChild(thumb);
+  const body = el('div', 'body');
+  body.appendChild(el('h3', null, r.title));
+  body.appendChild(el('div', 'source', r.source));
+  card.appendChild(body);
+  card.addEventListener('click', async () => {
+    const status = qs('#discover-status');
+    try {
+      await importFromUrl(r.url, status);
+      if (r.source) qs('#ed-source').value = r.source;
+    } catch (err) {
+      status.hidden = false;
+      status.textContent = `Couldn't import that one (${err.message}) — try another, or paste its link on the add screen.`;
+    }
+  });
+  return card;
+}
+
+async function initDiscover() {
+  if (feedLoaded) return;
+  feedLoaded = true;
+  const status = qs('#discover-status');
+  status.hidden = false;
+  status.innerHTML = `<div class="spinner"></div> Loading fresh recipes…`;
+  try {
+    const data = await callImportFn({ feed: true });
+    status.hidden = true;
+    const feedBox = qs('#discover-feed');
+    feedBox.innerHTML = '';
+    (data.results || []).forEach(r => feedBox.appendChild(discoverCard(r)));
+    qs('#discover-feed-label').hidden = !(data.results || []).length;
+  } catch (err) {
+    status.textContent = 'Could not load the recipe feed right now — search still works, or try again later.';
+  }
+}
+
+async function runDiscoverSearch() {
+  const q = qs('#discover-input').value.trim();
+  if (!q) return;
+  const status = qs('#discover-status');
+  status.hidden = false;
+  status.innerHTML = `<div class="spinner"></div> Searching your favorite sites…`;
+  qs('#discover-results').innerHTML = '';
+  qs('#discover-results-label').hidden = true;
+  try {
+    const data = await callImportFn({ search: q });
+    status.hidden = true;
+    const box = qs('#discover-results');
+    (data.results || []).forEach(r => box.appendChild(discoverCard(r)));
+    if ((data.results || []).length) {
+      qs('#discover-results-label').hidden = false;
+    } else {
+      status.hidden = false;
+      status.textContent = `No results for "${q}" — try a simpler term, like one main ingredient.`;
+    }
+  } catch (err) {
+    status.textContent = `Search hit a snag (${err.message}). Try again in a moment.`;
+  }
+}
+
+qs('#discover-go').addEventListener('click', runDiscoverSearch);
+qs('#discover-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.target.blur(); runDiscoverSearch(); } });
+qs('#discover-paste-link').addEventListener('click', () => { showView('view-import'); qs('#import-status').hidden = true; });
 
 /* ================= Editor (import preview / manual / remix) ================= */
 
@@ -592,6 +678,7 @@ qs('#ed-save').addEventListener('click', async () => {
     cook_time: qs('#ed-cook').value.trim(),
     ingredients,
     steps,
+    tags: state.draft.tags || [],
     notes: qs('#ed-note').value.trim(),
     created_by: state.member.id,
     parent_recipe_id: state.parentForRemix,
