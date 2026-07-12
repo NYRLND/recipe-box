@@ -57,7 +57,12 @@
     <button class="btn-ghost" id="detail-back" style="padding:0 0 10px;">&larr; Back</button>
     <div class="hero-image" id="detail-hero"></div>
     <div class="detail-header">
-      <h1 id="detail-title">Recipe title</h1>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <h1 id="detail-title" style="flex:1;">Recipe title</h1>
+        <button class="icon-btn" id="detail-share-icon" title="Share">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.7l6.8-4.4M8.6 13.3l6.8 4.4"/></svg>
+        </button>
+      </div>
       <div class="source-line" id="detail-source"></div>
     </div>
     <div class="meta-row">
@@ -106,9 +111,12 @@
     <button class="btn btn-ghost" id="btn-delete" style="width:100%;margin-top:16px;color:var(--color-danger);">Remove from recipe box</button>
 
     <!-- Preview mode (unsaved import): magazine read first, edit only if wanted -->
-    <div class="preview-bar" id="detail-actions-preview" hidden>
-      <button class="btn btn-secondary" id="btn-preview-edit">Edit details</button>
-      <button class="btn btn-primary" id="btn-preview-save">Save to recipe box</button>
+    <div class="preview-bar preview-bar-col" id="detail-actions-preview" hidden>
+      <button class="btn btn-secondary" id="btn-preview-plan">📅 Try it — add to plan</button>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-secondary" id="btn-preview-edit" style="flex:1;">Edit details</button>
+        <button class="btn btn-primary" id="btn-preview-save" style="flex:1;">Save to box</button>
+      </div>
     </div>
   </main>
 
@@ -253,7 +261,10 @@
   <div class="step-display">
     <div class="step-num-big" id="cook-step-num">Step 1 of 8</div>
     <div class="step-text-big" id="cook-step-text"></div>
-    <button class="timer-chip" id="cook-timer" hidden>⏱ Start timer</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="timer-chip" id="cook-timer" hidden>⏱ Start timer</button>
+      <button class="timer-chip" id="cook-timer-native" hidden>📱 Phone timer</button>
+    </div>
   </div>
   <div class="nav-row">
     <button class="btn btn-secondary" id="cook-prev">Back</button>

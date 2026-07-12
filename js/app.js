@@ -148,9 +148,14 @@ window.addEventListener('popstate', (e) => {
   navSuppress = false;
 });
 
+const scrollMem = {};
+
 function showView(id) {
+  const current = qsa('.view').find(v => !v.hidden);
+  if (current) scrollMem[current.id] = window.scrollY;
   qsa('.view').forEach(v => v.hidden = true);
   qs('#' + id).hidden = false;
+  requestAnimationFrame(() => window.scrollTo(0, scrollMem[id] || 0));
 }
 
 function setTab(tab) {
@@ -332,6 +337,7 @@ function renderRecipeDetail(r, { preview }) {
   qs('#btn-delete').hidden = preview;
   qs('#btn-save-box').hidden = preview || r.in_box !== false;
   qs('#detail-actions-preview').hidden = !preview;
+  qs('#detail-share-icon').hidden = false;
 
   qs('#detail-hero').style.backgroundImage = r.image_url ? `url('${r.image_url}')` : 'none';
   qs('#detail-hero').style.display = r.image_url ? '' : 'none';
@@ -347,6 +353,7 @@ function renderRecipeDetail(r, { preview }) {
   renderDetailIngredients();
   renderDetailSteps();
   renderDetailNotes();
+  scrollMem['view-detail'] = 0;
   window.scrollTo(0, 0);
   pushNav({ v: 'detail' });
 }
@@ -370,6 +377,18 @@ qs('#surprise-btn').addEventListener('click', () => {
 });
 
 qs('#btn-preview-edit').addEventListener('click', () => openEditor());
+qs('#btn-preview-plan').addEventListener('click', async () => {
+  const d = state.draft;
+  if (!d.title) return toast('This one has no title — tap Edit details');
+  try {
+    const rec = await insertDraftAsRecipe(d, false);   // tryout: on the plan, not the box
+    openPlanPickerFor(rec, { tryout: true });
+  } catch (e) { toast('Could not save — try again'); }
+});
+qs('#detail-share-icon').addEventListener('click', () => {
+  state.shareTargetRecipe = state.currentRecipe;
+  openSheet('share-sheet', 'sheet-backdrop');
+});
 qs('#btn-preview-save').addEventListener('click', async () => {
   const d = state.draft;
   if (!d.title) return toast('This one has no title — tap Edit details');
@@ -388,10 +407,13 @@ qs('#btn-preview-save').addEventListener('click', async () => {
 qs('#btn-delete').addEventListener('click', async () => {
   const r = state.currentRecipe;
   if (!confirm(`Remove "${r.title}" from the recipe box? This is for the whole family and can't be undone.`)) return;
-  // detach any remixes so the foreign key doesn't block deletion
+  // Clean up every reference first — works even if the DB lacks cascade rules
+  await supabase.from('favorites').delete().eq('recipe_id', r.id);
+  await supabase.from('meal_plan').delete().eq('recipe_id', r.id);
+  await supabase.from('grocery_items').update({ recipe_id: null }).eq('recipe_id', r.id);
   await supabase.from('recipes').update({ parent_recipe_id: null }).eq('parent_recipe_id', r.id);
   const { error } = await supabase.from('recipes').delete().eq('id', r.id);
-  if (error) return toast('Could not delete — try again');
+  if (error) return toast(`Could not delete: ${error.message}`);
   toast('Removed');
   setTab('box');
 });
@@ -408,10 +430,16 @@ function renderDetailIngredients() {
       <div class="amt">${disp.amt}</div><div class="txt">${disp.text}</div>`;
     row.querySelector('.check-circle').addEventListener('click', (e) => {
       e.currentTarget.classList.toggle('checked');
-      row.classList.toggle('checked');
+      updateGroceryBtnLabel();
     });
     box.appendChild(row);
   });
+  updateGroceryBtnLabel();
+}
+
+function updateGroceryBtnLabel() {
+  const n = qsa('#detail-ingredients .check-circle.checked').length;
+  qs('#add-all-grocery').textContent = n ? `+ Add ${n} to list` : '+ Add all to list';
 }
 
 function renderDetailSteps() {
@@ -447,11 +475,16 @@ qs('#serv-minus').addEventListener('click', () => { if (state.currentServings > 
 qs('#add-all-grocery').addEventListener('click', async () => {
   const r = state.currentRecipe;
   const scale = state.currentServings / (r.servings || state.currentServings || 1);
-  for (const ing of (r.ingredients || [])) {
+  const circles = qsa('#detail-ingredients .check-circle');
+  const selectedIdx = circles.filter(c => c.classList.contains('checked')).map(c => parseInt(c.dataset.i));
+  const ings = (r.ingredients || []).filter((_, i) => !selectedIdx.length || selectedIdx.includes(i));
+  for (const ing of ings) {
     const disp = ingredientDisplay(ing, scale);
-    await addGroceryItem(disp.text, disp.amt, r.id);
+    await addGroceryItem(disp.text, disp.amt, r.id || null);
   }
-  toast('Added to grocery list');
+  circles.forEach(c => c.classList.remove('checked'));
+  updateGroceryBtnLabel();
+  toast(`${ings.length} added to grocery list`);
 });
 
 /* ---- Remix ---- */
@@ -511,12 +544,22 @@ function showCookStep() {
   qs('#cook-next').textContent = state.cookIndex === steps.length - 1 ? 'Finish' : 'Next';
   const secs = timerSecondsFromStep(steps[state.cookIndex]);
   const chip = qs('#cook-timer');
+  const native = qs('#cook-timer-native');
+  const isAndroid = /android/i.test(navigator.userAgent);
   if (secs) {
     chip.hidden = false;
     chip.textContent = `⏱ Start ${Math.round(secs/60) || 1} min timer`;
     chip.onclick = () => startTimer(secs, chip);
+    native.hidden = !isAndroid;
+    if (isAndroid) {
+      native.onclick = () => {
+        const msg = encodeURIComponent(state.cookRecipe.title.slice(0, 40));
+        window.location.href = `intent://timer#Intent;action=android.intent.action.SET_TIMER;i.android.intent.extra.alarm.LENGTH=${secs};S.android.intent.extra.alarm.MESSAGE=${msg};B.android.intent.extra.alarm.SKIP_UI=true;end`;
+      };
+    }
   } else {
     chip.hidden = true;
+    native.hidden = true;
   }
 }
 
