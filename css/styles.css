@@ -991,3 +991,19 @@ button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2
 
 /* v6: hero no longer overlaps the Back button */
 .hero-image { margin: 12px -20px 0; border-radius: var(--radius-l); }
+
+/* v7: hide the visible scrollbar under chip rows (still swipeable) */
+.chip-row { scrollbar-width: none; -ms-overflow-style: none; }
+.chip-row::-webkit-scrollbar { display: none; }
+
+/* star ratings */
+.rating-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-gold);
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+.recipe-card .rating-line { margin-top: 3px; font-size: 0.72rem; }
+.rating-line .count { color: var(--color-ink-faint); font-weight: 600; }

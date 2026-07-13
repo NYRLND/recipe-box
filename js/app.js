@@ -387,9 +387,10 @@ function renderRecipeDetail(r, { preview }) {
   qs('#detail-hero').style.backgroundImage = r.image_url ? `url('${r.image_url}')` : 'none';
   qs('#detail-hero').style.display = r.image_url ? '' : 'none';
   qs('#detail-title').textContent = r.title;
-  qs('#detail-source').innerHTML = r.source_url
+  const ratingHtml = r.rating ? ` &nbsp;<span class="rating-line">★ ${Number(r.rating).toFixed(1)}${r.rating_count ? ` <span class="count">· ${r.rating_count} ratings</span>` : ''}</span>` : '';
+  qs('#detail-source').innerHTML = (r.source_url
     ? `From <a href="${r.source_url}" target="_blank" rel="noopener">${r.source || 'the web'}</a>`
-    : (r.source ? `From ${r.source}` : `Added by ${state.member.name}`);
+    : (r.source ? `From ${r.source}` : `Added by ${state.member.name}`)) + ratingHtml;
   qs('#detail-prep').textContent = r.prep_time || '–';
   qs('#detail-cook').textContent = r.cook_time || '–';
   qs('#detail-times').textContent = `${r.times_cooked || 0}×`;
@@ -441,7 +442,8 @@ qs('#btn-preview-save').addEventListener('click', async () => {
     title: d.title, source: d.source, source_url: d.source_url || null, image_url: d.image_url,
     servings: d.servings || 4, prep_time: d.prep_time, cook_time: d.cook_time,
     ingredients: d.ingredients || [], steps: d.steps || [], tags: d.tags || [],
-    notes: d.notes || '', created_by: state.member.id, parent_recipe_id: state.parentForRemix,
+    rating: d.rating || null, rating_count: d.rating_count || null,
+    notes: attributeNote(d.notes || '', null) || '', created_by: state.member.id, parent_recipe_id: null,
   }).select().single();
   if (error) return toast('Could not save — try again');
   toast('Saved to your recipe box');
@@ -703,6 +705,8 @@ async function importFromUrl(url, statusEl, { open = true } = {}) {
     ingredients: (data.ingredients || []).map(parseIngredientLine),
     steps: data.steps || [],
     tags: data.tags || [],
+    rating: data.rating || null,
+    rating_count: data.rating_count || null,
     notes: '',
   };
   state.draftMode = 'import';
@@ -717,6 +721,7 @@ async function insertDraftAsRecipe(d, inBox) {
     title: d.title, source: d.source, source_url: d.source_url || null, image_url: d.image_url,
     servings: d.servings || 4, prep_time: d.prep_time, cook_time: d.cook_time,
     ingredients: d.ingredients || [], steps: d.steps || [], tags: d.tags || [],
+    rating: d.rating || null, rating_count: d.rating_count || null,
     notes: d.notes || '', created_by: state.member.id, parent_recipe_id: state.parentForRemix,
     in_box: inBox,
   }).select().single();
@@ -789,6 +794,7 @@ function discoverCard(r) {
   const body = el('div', 'body');
   body.appendChild(el('h3', null, r.title));
   body.appendChild(el('div', 'source', r.source));
+  if (r.rating) body.appendChild(el('div', 'rating-line', `★ ${Number(r.rating).toFixed(1)}${r.rating_count ? ` <span class="count">(${r.rating_count})</span>` : ''}`));
   card.appendChild(body);
   card.addEventListener('click', async () => {
     const status = qs('#discover-status');
@@ -1055,6 +1061,8 @@ qs('#ed-save').addEventListener('click', async () => {
     ingredients,
     steps,
     tags: state.draft.tags || [],
+    rating: state.draft.rating || null,
+    rating_count: state.draft.rating_count || null,
     notes: attributeNote(qs('#ed-note').value.trim(), state.draft.notes),
   };
 

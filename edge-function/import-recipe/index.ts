@@ -129,7 +129,7 @@ async function importRecipe(url: string) {
     if (m) servings = parseInt(m[0]);
   }
 
-  return {
+  const result = {
     title: recipe.name || "",
     image_url: firstImage(recipe.image),
     servings,
@@ -139,7 +139,46 @@ async function importRecipe(url: string) {
     steps: flattenInstructions(recipe.recipeInstructions),
     tags: extractTags(recipe),
     rating: recipe.aggregateRating?.ratingValue ? Number(recipe.aggregateRating.ratingValue) : null,
+    rating_count: Number(recipe.aggregateRating?.ratingCount || recipe.aggregateRating?.reviewCount) || null,
   };
+
+  return result;
+}
+
+/* ---------------- rating enrichment for discover cards ---------------- */
+
+// warm-instance cache: url -> {rating, rating_count}
+const ratingCache = new Map<string, { rating: number | null; rating_count: number | null }>();
+
+async function fetchRating(url: string) {
+  if (ratingCache.has(url)) return ratingCache.get(url)!;
+  const out = { rating: null as number | null, rating_count: null as number | null };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 3500);
+    const resp = await fetch(url, { headers: UA, signal: ctrl.signal });
+    clearTimeout(t);
+    if (resp.ok) {
+      const html = await resp.text();
+      const recipe = extractRecipeFromHtml(html);
+      if (recipe?.aggregateRating) {
+        out.rating = Number(recipe.aggregateRating.ratingValue) || null;
+        out.rating_count = Number(recipe.aggregateRating.ratingCount || recipe.aggregateRating.reviewCount) || null;
+      }
+    }
+  } catch (_e) { /* fail soft */ }
+  ratingCache.set(url, out);
+  if (ratingCache.size > 800) ratingCache.delete(ratingCache.keys().next().value!);
+  return out;
+}
+
+async function enrichRatings(results: any[], limit = 14) {
+  await Promise.allSettled(results.slice(0, limit).map(async (r) => {
+    const { rating, rating_count } = await fetchRating(r.url);
+    r.rating = rating;
+    r.rating_count = rating_count;
+  }));
+  return results;
 }
 
 /* ---------------- search / feed helpers ---------------- */
@@ -310,8 +349,8 @@ Deno.serve(async (req: Request) => {
 
     if (body.url) return json(await importRecipe(String(body.url)));
     if (body.sites) return json({ sites: SITES });
-    if (body.search) return json({ results: await searchSites(String(body.search).slice(0, 80), page, body.sources) });
-    if (body.feed) return json({ results: await latestFeed(page, seed, body.sources, body.interests) });
+    if (body.search) return json({ results: await enrichRatings(await searchSites(String(body.search).slice(0, 80), page, body.sources)) });
+    if (body.feed) return json({ results: await enrichRatings(await latestFeed(page, seed, body.sources, body.interests)) });
 
     return json({ error: "Send { url }, { search }, or { feed: true }" }, 400);
   } catch (err) {

@@ -72,3 +72,7 @@ create policy "allow all" on meal_plan for all using (true) with check (true);
 
 -- v4: tryout recipes (planned from Discover but not yet saved to the box)
 alter table recipes add column if not exists in_box boolean not null default true;
+
+-- v7: star ratings pulled from source sites
+alter table recipes add column if not exists rating numeric;
+alter table recipes add column if not exists rating_count int;
