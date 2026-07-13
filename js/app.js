@@ -917,7 +917,13 @@ async function fetchDiscoverPage() {
     const results = (data.results || []).filter(r => !disc.seenUrls.has(r.url));
     results.forEach(r => disc.seenUrls.add(r.url));
     const box = disc.mode === 'search' ? qs('#discover-results') : qs('#discover-feed');
-    results.forEach(r => box.appendChild(discoverCard(r)));
+    const rendered = [];
+    results.forEach(r => {
+      const card = discoverCard(r);
+      box.appendChild(card);
+      rendered.push({ r, card });
+    });
+    lazyRatings(rendered);   // background fill for cards the server skipped
     if (disc.page === 1) {
       qs('#discover-results-label').hidden = !(disc.mode === 'search' && results.length);
       qs('#discover-feed-label').hidden = !(disc.mode === 'feed' && results.length);
@@ -939,6 +945,26 @@ async function fetchDiscoverPage() {
   } finally {
     disc.busy = false;
     more.hidden = true;
+  }
+}
+
+async function lazyRatings(rendered) {
+  const pending = rendered.filter(x => !x.r.rating);
+  for (let i = 0; i < pending.length; i += 10) {
+    const chunk = pending.slice(i, i + 10);
+    try {
+      const res = await callImportFn({ ratings: chunk.map(x => x.r.url) });
+      chunk.forEach(x => {
+        const info = res.ratings?.[x.r.url];
+        if (info?.rating && x.card.isConnected) {
+          x.r.rating = info.rating;
+          x.r.rating_count = info.rating_count;
+          x.card.querySelector('.body').appendChild(
+            el('div', 'rating-line', `★ ${Number(info.rating).toFixed(1)}${info.rating_count ? ` <span class="count">(${info.rating_count})</span>` : ''}`)
+          );
+        }
+      });
+    } catch (e) { break; }
   }
 }
 
@@ -1086,9 +1112,19 @@ qs('#ed-save').addEventListener('click', async () => {
 
 /* ================= Grocery List ================= */
 
+const STARTER_STAPLES = ['Eggs', 'Milk', 'Bread', 'Bananas', 'Butter', 'Cereal', 'Coffee', 'Fruit'];
+
 async function loadGrocery() {
   const { data } = await supabase.from('grocery_items').select('*, recipes(title)').order('created_at', { ascending: true });
   state.groceryItems = data || [];
+  // learn frequent buys from the last 90 days (survives list clearing)
+  const since = new Date(Date.now() - 90 * 86400000).toISOString();
+  const { data: hist } = await supabase.from('grocery_history').select('item').gte('added_at', since) || {};
+  const counts = {};
+  (hist || []).forEach(h => { const k = h.item.trim().toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
+  const frequent = Object.entries(counts).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1])
+    .map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
+  state.quickAdd = [...new Set([...frequent, ...STARTER_STAPLES])].slice(0, 8);
   drawGrocery();
 }
 
@@ -1096,6 +1132,21 @@ function drawGrocery() {
   const content = qs('#grocery-content');
   content.innerHTML = '';
   qs('#grocery-empty').hidden = state.groceryItems.length > 0;
+
+  // Quick add — one-tap staples
+  const onList = new Set(state.groceryItems.filter(i => !i.checked).map(i => i.item.trim().toLowerCase()));
+  const quick = (state.quickAdd || []).filter(q => !onList.has(q.toLowerCase()));
+  if (quick.length) {
+    content.appendChild(el('div', 'cat-label', 'Quick add'));
+    const row = el('div', 'chip-row');
+    quick.forEach(q => {
+      const c = el('button', 'chip', `+ ${q}`);
+      c.addEventListener('click', async () => { await addGroceryItem(q, null, null); drawGrocery(); });
+      row.appendChild(c);
+    });
+    content.appendChild(row);
+  }
+
   if (state.groceryItems.length) {
     const done = state.groceryItems.filter(i => i.checked).length;
     const prog = el('div', 'grocery-progress',
@@ -1169,6 +1220,8 @@ async function addGroceryItem(name, amount, recipeId) {
     item: name, amount: amount || null, added_by: state.member?.id || null, recipe_id: recipeId || null,
   }).select().single();
   if (data) state.groceryItems.push(data);
+  // history log powers Quick Add suggestions; fail-soft if migration not run yet
+  supabase.from('grocery_history').insert({ item: name }).then(() => {});
 }
 
 qs('#grocery-add-btn').addEventListener('click', async () => {

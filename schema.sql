@@ -76,3 +76,13 @@ alter table recipes add column if not exists in_box boolean not null default tru
 -- v7: star ratings pulled from source sites
 alter table recipes add column if not exists rating numeric;
 alter table recipes add column if not exists rating_count int;
+
+-- v8: grocery history for smart Quick Add (survives list clearing)
+create table if not exists grocery_history (
+  id uuid primary key default gen_random_uuid(),
+  item text not null,
+  added_at timestamptz default now()
+);
+alter table grocery_history enable row level security;
+drop policy if exists "allow all" on grocery_history;
+create policy "allow all" on grocery_history for all using (true) with check (true);

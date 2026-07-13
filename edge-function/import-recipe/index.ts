@@ -349,6 +349,12 @@ Deno.serve(async (req: Request) => {
 
     if (body.url) return json(await importRecipe(String(body.url)));
     if (body.sites) return json({ sites: SITES });
+    if (Array.isArray(body.ratings)) {
+      const urls: string[] = body.ratings.slice(0, 12).map(String);
+      const out: Record<string, { rating: number | null; rating_count: number | null }> = {};
+      await Promise.allSettled(urls.map(async (u) => { out[u] = await fetchRating(u); }));
+      return json({ ratings: out });
+    }
     if (body.search) return json({ results: await enrichRatings(await searchSites(String(body.search).slice(0, 80), page, body.sources)) });
     if (body.feed) return json({ results: await enrichRatings(await latestFeed(page, seed, body.sources, body.interests)) });
 
