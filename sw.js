@@ -1,4 +1,4 @@
-const CACHE = 'recipe-box-v16';
+const CACHE = 'recipe-box-v17';
 const SHELL = [
   './',
   './index.html',
