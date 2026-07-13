@@ -239,9 +239,9 @@ async function loadFavorites() {
 async function loadRecipes() {
   const { data } = await supabase.from('recipes').select('*').order('created_at', { ascending: false });
   state.recipes = data || [];
-  const tagSet = new Set();
-  state.recipes.forEach(r => (r.tags || []).forEach(t => tagSet.add(t)));
-  state.tags = Array.from(tagSet).slice(0, 10);
+  const tagCounts = {};
+  state.recipes.filter(r => r.in_box !== false).forEach(r => (r.tags || []).forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
+  state.tags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).map(([t]) => t);
 }
 
 async function renderBox() {
@@ -250,17 +250,34 @@ async function renderBox() {
   drawGrid();
 }
 
+let tagsExpanded = false;
+const TAG_CAP = 6;
+
 function renderTagChips() {
   const row = qs('#tag-chips');
   row.innerHTML = '';
   const favChip = el('button', 'chip' + (state.activeTag === '__fav' ? ' active' : ''), '♥ Favorites');
   favChip.addEventListener('click', () => { state.activeTag = state.activeTag === '__fav' ? null : '__fav'; renderTagChips(); drawGrid(); });
   row.appendChild(favChip);
-  state.tags.forEach(tag => {
+
+  // active tag always visible, even if it lives past the cap
+  let tags = state.tags;
+  if (!tagsExpanded && tags.length > TAG_CAP) {
+    tags = tags.slice(0, TAG_CAP);
+    if (state.activeTag && state.activeTag !== '__fav' && !tags.includes(state.activeTag)) tags = [...tags.slice(0, TAG_CAP - 1), state.activeTag];
+  }
+
+  tags.forEach(tag => {
     const c = el('button', 'chip' + (state.activeTag === tag ? ' active' : ''), tag);
     c.addEventListener('click', () => { state.activeTag = state.activeTag === tag ? null : tag; renderTagChips(); drawGrid(); });
     row.appendChild(c);
   });
+
+  if (state.tags.length > TAG_CAP) {
+    const more = el('button', 'chip chip-more', tagsExpanded ? 'less ▴' : `more ▾`);
+    more.addEventListener('click', () => { tagsExpanded = !tagsExpanded; renderTagChips(); });
+    row.appendChild(more);
+  }
 }
 
 function drawGrid() {
