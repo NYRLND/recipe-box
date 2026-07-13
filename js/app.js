@@ -940,7 +940,11 @@ async function fetchDiscoverPage() {
       box.appendChild(card);
       rendered.push({ r, card });
     });
-    lazyRatings(rendered);   // background fill for cards the server skipped
+    if (disc.mode === 'feed') {
+      disc.cacheResults = [...(disc.cacheResults || []), ...results];
+    }
+    lazyRatings(rendered).then(() => { if (disc.mode === 'feed') saveDiscCache(); });   // cache after ratings fill so reopen has stars too
+    if (disc.mode === 'feed') saveDiscCache();
     if (disc.page === 1) {
       qs('#discover-results-label').hidden = !(disc.mode === 'search' && results.length);
       qs('#discover-feed-label').hidden = !(disc.mode === 'feed' && results.length);
@@ -1003,17 +1007,46 @@ function resetDiscover(mode, query) {
 function resetToFeed() {
   resetDiscover('feed');
   qs('#discover-feed').innerHTML = '';
-  qs('#discover-feed-label').textContent = learnedInterests().length ? 'Inspired by your recipe box' : 'Fresh from your favorite sites';
+  disc.cacheResults = [];
+  qs('#discover-feed-label').textContent = learnedInterests().length ? 'Dinner ideas, inspired by your recipe box' : 'Dinner ideas for your table';
   const s = qs('#discover-status');
   s.hidden = false;
-  s.innerHTML = `<div class="spinner"></div> Finding tonight's contenders…`;
+  s.innerHTML = `<div class="spinner"></div> Finding tonight's dinner contenders…`;
   fetchDiscoverPage().then(() => { if (qs('#discover-feed').children.length) s.hidden = true; });
+}
+
+function saveDiscCache() {
+  if (disc.mode !== 'feed') return;
+  try {
+    localStorage.setItem('rb_disc_cache', JSON.stringify({ date: todayISO(), seed: disc.seed, page: disc.page, results: disc.cacheResults || [] }));
+  } catch (e) {}
 }
 
 async function initDiscover() {
   if (disc.started) return;
   disc.started = true;
-  resetToFeed();
+  // same-day cache: reopening later shows the same feed instantly; tomorrow is fresh
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem('rb_disc_cache') || 'null'); } catch (e) {}
+  if (cached && cached.date === todayISO() && cached.results?.length) {
+    disc.seed = cached.seed;
+    disc.page = cached.page;
+    disc.cacheResults = cached.results;
+    const box = qs('#discover-feed');
+    const rendered = [];
+    cached.results.forEach(r => {
+      disc.seenUrls.add(r.url);
+      const card = discoverCard(r);
+      box.appendChild(card);
+      rendered.push({ r, card });
+    });
+    qs('#discover-feed-label').textContent = 'Dinner ideas for your table';
+    qs('#discover-feed-label').hidden = false;
+    lazyRatings(rendered);
+  } else {
+    disc.cacheResults = [];
+    resetToFeed();
+  }
   const sentinel = qs('#discover-sentinel');
   new IntersectionObserver((entries) => {
     if (entries[0].isIntersecting && !qs('#view-discover').hidden) fetchDiscoverPage();
@@ -1232,7 +1265,46 @@ function groceryRow(item) {
   return row;
 }
 
+function normUnit(u) {
+  u = (u || '').toLowerCase().replace(/[.,]/g, '');
+  const map = { cups:'cup', tablespoons:'tbsp', tablespoon:'tbsp', teaspoons:'tsp', teaspoon:'tsp', pounds:'lb', lbs:'lb', pound:'lb', ounces:'oz', ounce:'oz', grams:'g', gram:'g', cloves:'clove', cans:'can', slices:'slice', bunches:'bunch' };
+  return map[u] || u;
+}
+
+function parseAmtString(s) {
+  if (!s) return { qty: null, unit: '' };
+  let qty = 0, found = false, unit = '';
+  s.trim().split(/\s+/).forEach(tok => {
+    if (UNICODE_FRAC[tok] !== undefined) { qty += UNICODE_FRAC[tok]; found = true; }
+    else if (/^\d+\/\d+$/.test(tok)) { const [a, b] = tok.split('/'); qty += parseInt(a) / parseInt(b); found = true; }
+    else if (/^\d*\.?\d+$/.test(tok)) { qty += parseFloat(tok); found = true; }
+    else if (/^[a-zA-Z]+$/.test(tok)) unit = normUnit(tok);
+  });
+  return { qty: found ? qty : null, unit };
+}
+
 async function addGroceryItem(name, amount, recipeId) {
+  // merge with an existing unchecked line for the same item
+  const key = name.trim().toLowerCase();
+  const existing = state.groceryItems.find(i => !i.checked && i.item.trim().toLowerCase() === key);
+  if (existing) {
+    let newAmt;
+    const a = parseAmtString(existing.amount), b = parseAmtString(amount);
+    const xMatch = (existing.amount || '').match(/^×(\d+)$/);
+    if (a.qty != null && b.qty != null && a.unit === b.unit) {
+      newAmt = `${formatAmount(a.qty + b.qty)}${a.unit ? ' ' + a.unit : ''}`;
+    } else if (!existing.amount && !amount) {
+      newAmt = '×2';
+    } else if (xMatch && !amount) {
+      newAmt = `×${parseInt(xMatch[1]) + 1}`;
+    } else {
+      newAmt = [existing.amount, amount].filter(Boolean).join(' + ');
+    }
+    existing.amount = newAmt;
+    await supabase.from('grocery_items').update({ amount: newAmt }).eq('id', existing.id);
+    supabase.from('grocery_history').insert({ item: name }).then(() => {});
+    return;
+  }
   const { data } = await supabase.from('grocery_items').insert({
     item: name, amount: amount || null, added_by: state.member?.id || null, recipe_id: recipeId || null,
   }).select().single();
@@ -1269,6 +1341,39 @@ async function loadPlan() {
   (data || []).forEach(row => { state.planEntries[row.planned_date] = row; });
   drawPlan();
 }
+
+qs('#fill-plan').addEventListener('click', async () => {
+  const emptyDays = visiblePlanDays().filter(d => d >= todayISO() && !state.planEntries[d]);
+  if (!emptyDays.length) return toast('Your plan is already full!');
+  const plannedIds = new Set(Object.values(state.planEntries).map(e => e.recipe_id));
+  let pool = state.recipes.filter(r => r.in_box !== false && !plannedIds.has(r.id));
+  pool = [...pool, ...pool.filter(r => state.favorites.has(r.id))];   // favorites weighted double
+  if (!pool.length) return toast('Add a few recipes to the box first');
+  const picks = [];
+  for (const day of emptyDays) {
+    if (!pool.length) break;
+    const pick = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+    pool = pool.filter(r => r.id !== pick.id);   // no repeats even via the favorites copy
+    picks.push({ day, recipe: pick });
+  }
+  for (const p of picks) {
+    await supabase.from('meal_plan').insert({ recipe_id: p.recipe.id, planned_date: p.day });
+  }
+  await loadPlan();
+  toast(`Planned ${picks.length} dinner${picks.length > 1 ? 's' : ''}`);
+  setTimeout(async () => {
+    if (!confirm(`Add the ingredients for ${picks.length === 1 ? 'it' : `these ${picks.length} meals`} to the grocery list?`)) return;
+    let count = 0;
+    for (const p of picks) {
+      for (const ing of (p.recipe.ingredients || [])) {
+        const disp = ingredientDisplay(ing, 1);
+        await addGroceryItem(disp.text, disp.amt, p.recipe.id);
+        count++;
+      }
+    }
+    toast(`${count} ingredients added (duplicates merged)`);
+  }, 600);
+});
 
 qs('#plan-earlier').addEventListener('click', async () => {
   plan.startOffset -= 3;

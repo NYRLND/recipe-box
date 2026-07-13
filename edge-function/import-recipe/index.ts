@@ -15,18 +15,18 @@ const corsHeaders = {
 // Curated sources. All are WordPress sites, searched via their public
 // wp-json REST API with an HTML-search fallback. Edit freely.
 const SITES = [
-  { name: "Damn Delicious", host: "damndelicious.net" },
-  { name: "Once Upon a Chef", host: "www.onceuponachef.com" },
-  { name: "RecipeTin Eats", host: "www.recipetineats.com" },
-  { name: "Gimme Some Oven", host: "www.gimmesomeoven.com" },
-  { name: "Cafe Delites", host: "cafedelites.com" },
-  { name: "The Recipe Critic", host: "therecipecritic.com" },
-  { name: "Natasha's Kitchen", host: "natashaskitchen.com" },
-  { name: "Dinner at the Zoo", host: "www.dinneratthezoo.com" },
-  { name: "Budget Bytes", host: "www.budgetbytes.com" },
-  { name: "Pinch of Yum", host: "pinchofyum.com" },
-  { name: "Half Baked Harvest", host: "www.halfbakedharvest.com" },
-  { name: "Sally's Baking Addiction", host: "sallysbakingaddiction.com" },
+  { name: "Damn Delicious", host: "damndelicious.net", focus: "dinner" },
+  { name: "Once Upon a Chef", host: "www.onceuponachef.com", focus: "dinner" },
+  { name: "RecipeTin Eats", host: "www.recipetineats.com", focus: "dinner" },
+  { name: "Gimme Some Oven", host: "www.gimmesomeoven.com", focus: "dinner" },
+  { name: "Cafe Delites", host: "cafedelites.com", focus: "dinner" },
+  { name: "The Recipe Critic", host: "therecipecritic.com", focus: "dinner" },
+  { name: "Natasha's Kitchen", host: "natashaskitchen.com", focus: "dinner" },
+  { name: "Dinner at the Zoo", host: "www.dinneratthezoo.com", focus: "dinner" },
+  { name: "Budget Bytes", host: "www.budgetbytes.com", focus: "dinner" },
+  { name: "Pinch of Yum", host: "pinchofyum.com", focus: "dinner" },
+  { name: "Half Baked Harvest", host: "www.halfbakedharvest.com", focus: "dinner" },
+  { name: "Sally's Baking Addiction", host: "sallysbakingaddiction.com", focus: "baking" },
 ];
 
 const UA = { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", "Accept": "text/html,application/json" };
@@ -310,7 +310,10 @@ function shuffle<T>(arr: T[]): T[] {
 // random seed offset (so the same recipes don't surface every time), and
 // mixes in searches for the family's learned interests from their recipe box.
 async function latestFeed(page: number, seed: number, sources?: string[], interests?: string[]) {
-  const sites = activeSites(sources);
+  // Default feed is dinner ideas — baking-focused sites join in only when explicitly selected
+  const sites = (Array.isArray(sources) && sources.length)
+    ? activeSites(sources)
+    : SITES.filter((s) => s.focus !== "baking");
   const per = 3;
   const tasks: Promise<any[]>[] = sites.map(async (site) => {
     const offset = seed + (page - 1) * per;
