@@ -131,12 +131,7 @@
       <input class="search-input" id="import-url" placeholder="https://www.damndelicious.net/…" inputmode="url">
       <button class="btn btn-primary" id="import-go" style="width:auto;padding:12px 18px;">Go</button>
     </div>
-    <div class="source-strip">
-      <span class="src">Damn Delicious</span>
-      <span class="src">Once Upon a Chef</span>
-      <span class="src">NYT Cooking</span>
-      <span class="src">Any recipe site</span>
-    </div>
+    <p style="text-align:center;color:var(--color-ink-faint);font-size:0.8rem;margin-top:14px;">Works with Damn Delicious, Once Upon a Chef, NYT Cooking, and nearly any recipe site.</p>
     <div class="import-status" id="import-status" hidden></div>
     <button class="btn btn-ghost" id="import-manual" style="margin-top:22px;">Or type in a recipe by hand →</button>
   </main>
@@ -225,7 +220,10 @@
   <main class="view" id="view-plan" hidden>
     <h2>Next up</h2>
     <p style="color:var(--color-ink-soft);font-size:0.88rem;margin-top:4px;">Today and the days ahead. Long-press a planned meal to move it.</p>
-    <button class="btn btn-ghost" id="plan-earlier" style="width:100%;margin-top:10px;">↑ Show earlier days</button>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button class="btn btn-ghost" id="plan-earlier" style="flex:1;">↑ Earlier days</button>
+      <button class="btn btn-ghost" id="plan-earlier-hide" style="flex:1;" hidden>↓ Hide earlier</button>
+    </div>
     <div class="day-strip" id="day-strip"></div>
   </main>
 
@@ -288,6 +286,17 @@
   <div class="sheet-handle"></div>
   <h3 style="margin-bottom:14px;">Add to which day?</h3>
   <div id="plan-sheet-days"></div>
+</div>
+
+<!-- RECIPE BOX LONG-PRESS ACTIONS -->
+<div class="sheet-backdrop" id="box-action-backdrop"></div>
+<div class="sheet" id="box-action-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:14px;" id="box-action-title">Recipe</h3>
+  <button class="btn btn-secondary" id="box-act-plan" style="width:100%;margin-bottom:10px;justify-content:flex-start;">📅 Add to plan</button>
+  <button class="btn btn-secondary" id="box-act-grocery" style="width:100%;margin-bottom:10px;justify-content:flex-start;">🛒 Add ingredients to grocery list</button>
+  <button class="btn btn-secondary" id="box-act-share" style="width:100%;margin-bottom:10px;justify-content:flex-start;">💬 Share recipe</button>
+  <button class="btn btn-secondary" id="box-act-delete" style="width:100%;justify-content:flex-start;color:var(--color-danger);">🗑 Remove from box</button>
 </div>
 
 <!-- SOURCE FILTER SHEET -->

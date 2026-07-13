@@ -289,15 +289,60 @@ function recipeCard(r) {
   fav.addEventListener('click', async (e) => { e.stopPropagation(); await toggleFavorite(r.id, fav); });
   card.appendChild(fav);
 
-  if (r.parent_recipe_id) card.appendChild(el('div', 'remix-pill', 'Remixed'));
-
   const body = el('div', 'body');
   body.appendChild(el('h3', null, r.title));
   body.appendChild(el('div', 'source', r.source || 'Your kitchen'));
   card.appendChild(body);
 
   card.addEventListener('click', () => openDetail(r.id));
+  addLongPress(card, () => {
+    boxActionTarget = r;
+    qs('#box-action-title').textContent = r.title;
+    openSheet('box-action-sheet', 'box-action-backdrop');
+  });
   return card;
+}
+
+let boxActionTarget = null;
+qs('#box-action-backdrop').addEventListener('click', () => closeSheet('box-action-sheet', 'box-action-backdrop'));
+qs('#box-act-plan').addEventListener('click', () => {
+  closeSheet('box-action-sheet', 'box-action-backdrop');
+  if (boxActionTarget) openPlanPickerFor(boxActionTarget);
+});
+qs('#box-act-share').addEventListener('click', () => {
+  closeSheet('box-action-sheet', 'box-action-backdrop');
+  if (!boxActionTarget) return;
+  state.shareTargetRecipe = boxActionTarget;
+  openSheet('share-sheet', 'sheet-backdrop');
+});
+qs('#box-act-grocery').addEventListener('click', async () => {
+  closeSheet('box-action-sheet', 'box-action-backdrop');
+  const r = boxActionTarget;
+  if (!r) return;
+  for (const ing of (r.ingredients || [])) {
+    const disp = ingredientDisplay(ing, 1);
+    await addGroceryItem(disp.text, disp.amt, r.id);
+  }
+  toast(`${(r.ingredients || []).length} ingredients added to the list`);
+});
+qs('#box-act-delete').addEventListener('click', async () => {
+  closeSheet('box-action-sheet', 'box-action-backdrop');
+  const r = boxActionTarget;
+  if (!r) return;
+  if (!confirm(`Remove "${r.title}" from the recipe box? This is for the whole family and can't be undone.`)) return;
+  const err = await deleteRecipeEverywhere(r);
+  if (err) return toast(`Could not delete: ${err.message}`);
+  toast('Removed');
+  renderBox();
+});
+
+async function deleteRecipeEverywhere(r) {
+  await supabase.from('favorites').delete().eq('recipe_id', r.id);
+  await supabase.from('meal_plan').delete().eq('recipe_id', r.id);
+  await supabase.from('grocery_items').update({ recipe_id: null }).eq('recipe_id', r.id);
+  await supabase.from('recipes').update({ parent_recipe_id: null }).eq('parent_recipe_id', r.id);
+  const { error } = await supabase.from('recipes').delete().eq('id', r.id);
+  return error;
 }
 
 async function toggleFavorite(recipeId, btnEl) {
@@ -407,13 +452,8 @@ qs('#btn-preview-save').addEventListener('click', async () => {
 qs('#btn-delete').addEventListener('click', async () => {
   const r = state.currentRecipe;
   if (!confirm(`Remove "${r.title}" from the recipe box? This is for the whole family and can't be undone.`)) return;
-  // Clean up every reference first — works even if the DB lacks cascade rules
-  await supabase.from('favorites').delete().eq('recipe_id', r.id);
-  await supabase.from('meal_plan').delete().eq('recipe_id', r.id);
-  await supabase.from('grocery_items').update({ recipe_id: null }).eq('recipe_id', r.id);
-  await supabase.from('recipes').update({ parent_recipe_id: null }).eq('parent_recipe_id', r.id);
-  const { error } = await supabase.from('recipes').delete().eq('id', r.id);
-  if (error) return toast(`Could not delete: ${error.message}`);
+  const err = await deleteRecipeEverywhere(r);
+  if (err) return toast(`Could not delete: ${err.message}`);
   toast('Removed');
   setTab('box');
 });
@@ -487,13 +527,12 @@ qs('#add-all-grocery').addEventListener('click', async () => {
   toast(`${ings.length} added to grocery list`);
 });
 
-/* ---- Remix ---- */
+/* ---- Edit / remix (updates the recipe in place) ---- */
 qs('#btn-remix').addEventListener('click', () => {
   const r = state.currentRecipe;
   state.draft = JSON.parse(JSON.stringify(r));
-  state.draft.title = r.title + ` (${state.member.name}'s version)`;
-  state.parentForRemix = r.id;
-  state.draftMode = 'remix';
+  state.draftMode = 'edit';
+  state.parentForRemix = null;
   openEditor();
 });
 
@@ -757,10 +796,14 @@ function discoverCard(r) {
       await importFromUrl(r.url, status);
       state.draft.source = r.source || state.draft.source;
     } catch (err) {
-      status.hidden = false;
-      status.textContent = /No recipe data/.test(err.message)
-        ? `That one's an article, not a single recipe — try another card.`
-        : `Couldn't import that one (${err.message}) — try another.`;
+      status.hidden = true;
+      if (/No recipe data/.test(err.message)) {
+        toast('Not a single recipe — opening the page instead');
+        window.open(r.url, '_blank');
+      } else {
+        status.hidden = false;
+        status.textContent = `Couldn't import that one (${err.message}) — try another.`;
+      }
     }
   });
   addLongPress(card, () => {
@@ -948,14 +991,14 @@ qs('#discover-paste-link').addEventListener('click', () => { showView('view-impo
 
 function openEditor() {
   const d = state.draft;
-  qs('#editor-heading').textContent = state.draftMode === 'remix' ? 'Remix this recipe' : state.draftMode === 'import' ? 'Review recipe' : 'Add a recipe';
+  qs('#editor-heading').textContent = state.draftMode === 'edit' ? 'Edit recipe' : state.draftMode === 'import' ? 'Review recipe' : 'Add a recipe';
   qs('#ed-title').value = d.title || '';
   qs('#ed-source').value = d.source || '';
   qs('#ed-image').value = d.image_url || '';
   qs('#ed-servings').value = d.servings || 4;
   qs('#ed-prep').value = d.prep_time || '';
   qs('#ed-cook').value = d.cook_time || '';
-  qs('#ed-note-label').textContent = state.draftMode === 'remix' ? "What did you change?" : 'Note (optional)';
+  qs('#ed-note-label').textContent = state.draftMode === 'edit' ? 'Notes — what did you change?' : 'Note (optional)';
   qs('#ed-note').value = d.notes || '';
 
   const ingBox = qs('#ed-ingredients'); ingBox.innerHTML = '';
@@ -985,8 +1028,15 @@ qs('#add-ingredient-row').addEventListener('click', () => addEditorRow(qs('#ed-i
 qs('#add-step-row').addEventListener('click', () => addEditorRow(qs('#ed-steps'), '', true));
 qs('#editor-back').addEventListener('click', () => {
   if (state.draftMode === 'import') openDraftPreview();
-  else setTab('box');
+  else history.back();
 });
+
+function attributeNote(note, previous) {
+  // sign new/changed notes with the author's name so the handwritten cards say who wrote them
+  if (!note || note === previous) return note;
+  const lines = note.split('\n').map(l => l.trim()).filter(Boolean);
+  return lines.map(l => (/[—(]/.test(l.slice(-14)) || l.includes('—')) ? l : `${l} — ${state.member.name}`).join('\n');
+}
 
 qs('#ed-save').addEventListener('click', async () => {
   const title = qs('#ed-title').value.trim();
@@ -1005,11 +1055,20 @@ qs('#ed-save').addEventListener('click', async () => {
     ingredients,
     steps,
     tags: state.draft.tags || [],
-    notes: qs('#ed-note').value.trim(),
-    created_by: state.member.id,
-    parent_recipe_id: state.parentForRemix,
+    notes: attributeNote(qs('#ed-note').value.trim(), state.draft.notes),
   };
 
+  if (state.draftMode === 'edit' && state.draft.id) {
+    const { error } = await supabase.from('recipes').update(payload).eq('id', state.draft.id);
+    if (error) return toast('Could not save — try again');
+    toast('Recipe updated');
+    await renderBox();
+    openDetail(state.draft.id);
+    return;
+  }
+
+  payload.created_by = state.member.id;
+  payload.parent_recipe_id = null;
   const { data, error } = await supabase.from('recipes').insert(payload).select().single();
   if (error) return toast('Could not save — try again');
   toast('Saved to your recipe box');
@@ -1020,7 +1079,7 @@ qs('#ed-save').addEventListener('click', async () => {
 /* ================= Grocery List ================= */
 
 async function loadGrocery() {
-  const { data } = await supabase.from('grocery_items').select('*').order('created_at', { ascending: true });
+  const { data } = await supabase.from('grocery_items').select('*, recipes(title)').order('created_at', { ascending: true });
   state.groceryItems = data || [];
   drawGrocery();
 }
@@ -1034,6 +1093,16 @@ function drawGrocery() {
     const prog = el('div', 'grocery-progress',
       `<div class="count">${done} of ${state.groceryItems.length} in the cart</div><div class="bar"><div style="width:${Math.round(done / state.groceryItems.length * 100)}%;"></div></div>`);
     content.appendChild(prog);
+    // which recipes this list covers
+    const titles = {};
+    state.groceryItems.forEach(i => { const t = i.recipes?.title; if (t) titles[t] = (titles[t] || 0) + 1; });
+    const names = Object.keys(titles);
+    if (names.length) {
+      const row = el('div', 'chip-row');
+      row.style.marginTop = '10px';
+      names.forEach(t => row.appendChild(el('span', 'chip', `🍳 ${t}`)));
+      content.appendChild(row);
+    }
   }
   const byCat = {};
   state.groceryItems.forEach(item => {
@@ -1047,16 +1116,28 @@ function drawGrocery() {
     byCat[cat].sort((a,b) => a.checked - b.checked).forEach(item => section.appendChild(groceryRow(item)));
     content.appendChild(section);
   });
+  const btnRow = el('div', 'action-row');
   if (state.groceryItems.some(i => i.checked)) {
-    const clearBtn = el('button', 'btn btn-ghost', 'Clear checked items');
-    clearBtn.style.marginTop = '18px';
+    const clearBtn = el('button', 'btn btn-ghost', 'Clear checked');
     clearBtn.addEventListener('click', async () => {
       const ids = state.groceryItems.filter(i => i.checked).map(i => i.id);
       await supabase.from('grocery_items').delete().in('id', ids);
       loadGrocery();
     });
-    content.appendChild(clearBtn);
+    btnRow.appendChild(clearBtn);
   }
+  if (state.groceryItems.length) {
+    const clearAll = el('button', 'btn btn-ghost', 'Clear all');
+    clearAll.style.color = 'var(--color-danger)';
+    clearAll.addEventListener('click', async () => {
+      if (!confirm('Clear the entire grocery list for everyone?')) return;
+      const ids = state.groceryItems.map(i => i.id);
+      await supabase.from('grocery_items').delete().in('id', ids);
+      loadGrocery();
+    });
+    btnRow.appendChild(clearAll);
+  }
+  if (btnRow.children.length) content.appendChild(btnRow);
 }
 
 function groceryRow(item) {
@@ -1111,7 +1192,19 @@ async function loadPlan() {
   drawPlan();
 }
 
-qs('#plan-earlier').addEventListener('click', () => { plan.startOffset -= 7; loadPlan(); });
+qs('#plan-earlier').addEventListener('click', async () => {
+  plan.startOffset -= 3;
+  await loadPlan();
+  qs('#plan-earlier-hide').hidden = false;
+  const todayCard = qs('#day-strip .today-card');
+  if (todayCard) window.scrollTo({ top: todayCard.offsetTop - 90 });
+});
+qs('#plan-earlier-hide').addEventListener('click', async () => {
+  plan.startOffset = 0;
+  await loadPlan();
+  qs('#plan-earlier-hide').hidden = true;
+  window.scrollTo(0, 0);
+});
 
 async function moveEntryToDay(entry, targetDay) {
   const existing = state.planEntries[targetDay];
@@ -1166,6 +1259,15 @@ function drawPlan() {
       slot.querySelector('.slot-remove').addEventListener('click', async (e) => {
         e.stopPropagation();
         await supabase.from('meal_plan').delete().eq('id', entry.id);
+        // pull its unbought ingredients off the grocery list (bought ones stay)
+        const { data: removed } = await supabase.from('grocery_items').delete()
+          .eq('recipe_id', entry.recipe_id).eq('checked', false).select('id');
+        // a tryout that's no longer planned anywhere has no home — clean it up
+        if (entry.recipes.in_box === false) {
+          const { data: still } = await supabase.from('meal_plan').select('id').eq('recipe_id', entry.recipe_id);
+          if (!still?.length) await deleteRecipeEverywhere(entry.recipes);
+        }
+        if (removed?.length) toast(`Removed — and took ${removed.length} items off the grocery list`);
         loadPlan();
       });
       addLongPress(slot, () => openPlanPickerFor(null, { moveEntry: entry }));

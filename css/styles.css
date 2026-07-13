@@ -988,3 +988,6 @@ button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2
 /* ingredient circles now mean "send to grocery list" — no strikethrough */
 .ingredient-row.checked { opacity: 1; text-decoration: none; }
 .ingredient-row .check-circle.checked { background: var(--color-accent); border-color: var(--color-accent); }
+
+/* v6: hero no longer overlaps the Back button */
+.hero-image { margin: 12px -20px 0; border-radius: var(--radius-l); }

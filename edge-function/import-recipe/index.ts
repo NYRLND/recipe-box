@@ -151,8 +151,10 @@ function looksLikeRoundup(title: string, url: string): boolean {
   const u = url.toLowerCase();
   if (/\b\d{1,3}\s+(?:\w+\s+){0,3}recipes\b/.test(t)) return true;      // "35 best chicken recipes"
   if (/\brecipes\s+(?:for|to)\b/.test(t) && /\b\d{1,3}\b/.test(t)) return true;
-  if (/round-?up|meal\s*plan|meal\s*prep\s*(?:menu|plan|ideas)|gift guide|what to cook|weekly menu|dinner ideas/i.test(t)) return true;
-  if (/round-?up|meal-?plan|weekly-menu|gift-guide/.test(u)) return true;
+  if (/round-?up|meal\s*plan|menu\s*plan|meal\s*prep\s*(?:menu|plan|ideas)|gift guide|what to cook|weekly menu|dinner ideas|shopping list/i.test(t)) return true;
+  // non-recipe posts: announcements, community/life updates, promos
+  if (/giveaway|announcement|cookbook|behind the scenes|the things we do|life lately|q\s*&\s*a|reader survey|we'?re hiring|year in review|my favorite (products|things)|gift ideas/i.test(t)) return true;
+  if (/round-?up|meal-?plan|menu-?plan|weekly-menu|gift-guide|giveaway|announcement/.test(u)) return true;
   return false;
 }
 
