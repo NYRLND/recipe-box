@@ -26,6 +26,7 @@ const SITES = [
   { name: "Budget Bytes", host: "www.budgetbytes.com", focus: "dinner" },
   { name: "Pinch of Yum", host: "pinchofyum.com", focus: "dinner" },
   { name: "Half Baked Harvest", host: "www.halfbakedharvest.com", focus: "dinner" },
+  { name: "Cookie and Kate", host: "cookieandkate.com", focus: "dinner" },
   { name: "Sally's Baking Addiction", host: "sallysbakingaddiction.com", focus: "baking" },
 ];
 
