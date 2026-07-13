@@ -1007,3 +1007,12 @@ button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2
 }
 .recipe-card .rating-line { margin-top: 3px; font-size: 0.72rem; }
 .rating-line .count { color: var(--color-ink-faint); font-weight: 600; }
+
+/* v9: quick-add chips wrap into tidy rows, no sideways scrolling */
+.quick-add-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.quick-add-wrap .chip { flex-shrink: 1; }
