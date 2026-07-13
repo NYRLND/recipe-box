@@ -1138,7 +1138,7 @@ function drawGrocery() {
   const quick = (state.quickAdd || []).filter(q => !onList.has(q.toLowerCase()));
   if (quick.length) {
     content.appendChild(el('div', 'cat-label', 'Quick add'));
-    const row = el('div', 'quick-add-wrap');
+    const row = el('div', 'chip-wrap');
     quick.forEach(q => {
       const c = el('button', 'chip', `+ ${q}`);
       c.addEventListener('click', async () => { await addGroceryItem(q, null, null); drawGrocery(); });
@@ -1157,7 +1157,7 @@ function drawGrocery() {
     state.groceryItems.forEach(i => { const t = i.recipes?.title; if (t) titles[t] = (titles[t] || 0) + 1; });
     const names = Object.keys(titles);
     if (names.length) {
-      const row = el('div', 'quick-add-wrap');
+      const row = el('div', 'chip-wrap');
       row.style.marginTop = '10px';
       names.forEach(t => row.appendChild(el('span', 'chip', `🍳 ${t}`)));
       content.appendChild(row);
