@@ -600,6 +600,26 @@ a { color: inherit; }
 .grocery-row.checked .txt { text-decoration: line-through; color: var(--color-ink-faint); }
 .grocery-row .added-by { font-size: 0.62rem; color: var(--color-ink-faint); }
 
+.member-badge {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  line-height: 1;
+}
+.member-badge-chip {
+  width: 16px;
+  height: 16px;
+  font-size: 0.58rem;
+  margin-left: 6px;
+}
+
 .add-item-row {
   display: flex;
   gap: 8px;

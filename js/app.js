@@ -95,6 +95,52 @@ function categorize(itemName) {
   return 'Other';
 }
 
+// Two distinct, stable colors for member badges — shared visual language with Hearth.
+// Falls back to ink-faint for any member beyond the first two (or unknown/legacy rows).
+const BADGE_PALETTE = ['#4A7C8C', '#C1666B']; // teal (1st member), muted rose (2nd member)
+
+function memberColorFor(id) {
+  if (!id) return '#9A9384';
+  const idx = state.members.findIndex(m => m.id === id);
+  return idx === -1 ? '#9A9384' : BADGE_PALETTE[idx % BADGE_PALETTE.length];
+}
+
+function memberBadge(id) {
+  const m = state.members.find(x => x.id === id);
+  if (!m || !m.name) return null;
+  const badge = el('div', 'member-badge');
+  badge.textContent = m.name.trim().charAt(0).toUpperCase();
+  badge.style.background = memberColorFor(id);
+  badge.title = m.name;
+  return badge;
+}
+
+// Decode HTML entities (&amp;, &#39;, etc.) that sometimes ride along in scraped ingredient text.
+function decodeHtmlEntities(str) {
+  const ta = document.createElement('textarea');
+  ta.innerHTML = str;
+  return ta.value;
+}
+
+// Turn a raw ingredient line into a short, shoppable item name shared with Hearth's UI.
+// Strips parenthetical asides ("(or thyme, sage)") out of the name; if the aside looks like
+// a genuine substitution/brand note rather than filler, it's kept and returned separately
+// so the caller can fold it into `amount` instead of leaving it jammed into `item`.
+function cleanGroceryItemText(raw) {
+  let text = decodeHtmlEntities(String(raw || '')).trim();
+  let note = null;
+  const m = text.match(/\s*\(([^)]+)\)/);
+  if (m) {
+    const inner = m[1].trim();
+    text = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim();
+    if (inner && /\b(or|optional|preferably|sub|substitute|not |brand)\b/i.test(inner)) {
+      note = inner;
+    }
+  }
+  text = text.replace(/\s{2,}/g, ' ').replace(/\s+([,;.])/g, '$1').replace(/[,;]\s*$/, '').trim();
+  return { item: text, note };
+}
+
 function timerSecondsFromStep(text) {
   const m = text.match(/(\d+)\s*(?:-|to)?\s*(\d+)?\s*(minute|min|hour|hr)s?/i);
   if (!m) return null;
@@ -1171,10 +1217,19 @@ async function loadGrocery() {
   const since = new Date(Date.now() - 90 * 86400000).toISOString();
   const { data: hist } = await supabase.from('grocery_history').select('item').gte('added_at', since) || {};
   const counts = {};
-  (hist || []).forEach(h => { const k = h.item.trim().toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
+  // grocery_history doesn't currently store who added an item (no added_by column), so chips
+  // aren't attributable yet — h.added_by is undefined today. If that column gets added later,
+  // this starts populating state.quickAddBy automatically and drawGrocery() will show badges.
+  const lastAddedBy = {};
+  (hist || []).forEach(h => {
+    const k = h.item.trim().toLowerCase();
+    counts[k] = (counts[k] || 0) + 1;
+    if (h.added_by) lastAddedBy[k] = h.added_by;
+  });
   const frequent = Object.entries(counts).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1])
     .map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
   state.quickAdd = [...new Set([...frequent, ...STARTER_STAPLES])].slice(0, 8);
+  state.quickAddBy = lastAddedBy;
   drawGrocery();
 }
 
@@ -1191,6 +1246,9 @@ function drawGrocery() {
     const row = el('div', 'chip-wrap');
     quick.forEach(q => {
       const c = el('button', 'chip', `+ ${q}`);
+      const attributedId = (state.quickAddBy || {})[q.toLowerCase()];
+      const badge = attributedId ? memberBadge(attributedId) : null;
+      if (badge) { badge.classList.add('member-badge-chip'); c.appendChild(badge); }
       c.addEventListener('click', async () => { await addGroceryItem(q, null, null); drawGrocery(); });
       row.appendChild(c);
     });
@@ -1215,7 +1273,7 @@ function drawGrocery() {
   }
   const byCat = {};
   state.groceryItems.forEach(item => {
-    const cat = categorize(item.item);
+    const cat = item.category || categorize(item.item);
     (byCat[cat] = byCat[cat] || []).push(item);
   });
   const order = ['Produce','Meat & Seafood','Dairy & Eggs','Bakery','Pantry','Frozen','Other'];
@@ -1254,6 +1312,8 @@ function groceryRow(item) {
   row.innerHTML = `<div class="check-circle${item.checked ? ' checked' : ''}"><svg viewBox="0 0 24 24" fill="none" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div>
     <div class="txt">${item.item}</div>
     ${item.amount ? `<div class="amt">${item.amount}</div>` : ''}`;
+  const badge = memberBadge(item.added_by);
+  if (badge) row.appendChild(badge);
   row.querySelector('.check-circle').addEventListener('click', async (e) => {
     const next = !item.checked;
     item.checked = next;
@@ -1284,6 +1344,13 @@ function parseAmtString(s) {
 }
 
 async function addGroceryItem(name, amount, recipeId) {
+  // clean up scraped ingredient text before it ever touches the DB — this table is shared
+  // with Hearth's UI now, so messy "few sprigs rosemary (or thyme, sage)"-style text shows
+  // up there too. Any genuine substitution/brand note gets folded into amount instead.
+  const { item: cleanName, note } = cleanGroceryItemText(name);
+  if (note) amount = amount ? `${amount} (${note})` : `(${note})`;
+  name = cleanName;
+
   // merge with an existing unchecked line for the same item
   const key = name.trim().toLowerCase();
   const existing = state.groceryItems.find(i => !i.checked && i.item.trim().toLowerCase() === key);
@@ -1307,6 +1374,7 @@ async function addGroceryItem(name, amount, recipeId) {
   }
   const { data } = await supabase.from('grocery_items').insert({
     item: name, amount: amount || null, added_by: state.member?.id || null, recipe_id: recipeId || null,
+    category: categorize(name),
   }).select().single();
   if (data) state.groceryItems.push(data);
   // history log powers Quick Add suggestions; fail-soft if migration not run yet
