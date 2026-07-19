@@ -149,6 +149,51 @@ function timerSecondsFromStep(text) {
   return Math.round(n * (isHour ? 3600 : 60));
 }
 
+/* ================= Long-press (used to permanently dismiss a Quick Add chip) ================= */
+
+function attachLongPress(node, onLongPress, delay = 550) {
+  let timer = null, fired = false, startX = 0, startY = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  const start = (x, y) => {
+    fired = false;
+    startX = x; startY = y;
+    timer = setTimeout(() => {
+      fired = true;
+      if (navigator.vibrate) navigator.vibrate(15);
+      onLongPress();
+    }, delay);
+  };
+  node.addEventListener('touchstart', (e) => { const t = e.touches[0]; start(t.clientX, t.clientY); }, { passive: true });
+  node.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) cancel();
+  }, { passive: true });
+  node.addEventListener('touchend', cancel);
+  node.addEventListener('touchcancel', cancel);
+  node.addEventListener('mousedown', (e) => start(e.clientX, e.clientY));
+  node.addEventListener('mouseup', cancel);
+  node.addEventListener('mouseleave', cancel);
+  // swallow the click that follows a long-press so it doesn't also trigger the tap action
+  node.addEventListener('click', (e) => {
+    if (fired) { e.preventDefault(); e.stopImmediatePropagation(); fired = false; }
+  });
+}
+
+// Quick Add dismissals are permanent and per-device (stored in localStorage, not Supabase) —
+// this is a personal "stop suggesting this" preference rather than shared household data.
+const QUICKADD_EXCLUDE_KEY = 't42_quickadd_excluded';
+
+function getQuickAddExclusions() {
+  try { return new Set(JSON.parse(localStorage.getItem(QUICKADD_EXCLUDE_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+
+function excludeFromQuickAdd(name) {
+  const set = getQuickAddExclusions();
+  set.add(name.trim().toLowerCase());
+  localStorage.setItem(QUICKADD_EXCLUDE_KEY, JSON.stringify([...set]));
+}
+
 /* ================= State ================= */
 
 const state = {
@@ -273,6 +318,53 @@ qs('#who-badge').addEventListener('click', () => {
 });
 
 qsa('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
+
+/* ================= Swipe between tabs ================= */
+
+const TAB_ORDER = ['box', 'discover', 'plan', 'grocery'];
+const SWIPE_MIN_DIST = 60;      // px — minimum horizontal travel to count as a swipe
+const SWIPE_MAX_OFF_AXIS = 50;  // px — reject if it's more of a vertical scroll than a swipe
+// Elements with their own horizontal scrolling — a swipe starting here should scroll them,
+// not flip tabs.
+const SWIPE_EXCLUDE_SELECTOR = '.chip-row, .source-strip, .day-strip, .chip-wrap';
+const SWIPE_TAB_VIEW_IDS = ['view-box', 'view-discover', 'view-plan', 'view-grocery'];
+
+let swipeStartX = 0, swipeStartY = 0, swipeTracking = false;
+
+function swipeAllowed(target) {
+  if (document.querySelector('.sheet.show')) return false;
+  const cookMode = qs('#cook-mode');
+  if (cookMode && !cookMode.hidden) return false;
+  if (target.closest && target.closest(SWIPE_EXCLUDE_SELECTOR)) return false;
+  const current = qsa('.view').find(v => !v.hidden);
+  if (!current || !SWIPE_TAB_VIEW_IDS.includes(current.id)) return false;
+  return true;
+}
+
+document.addEventListener('touchstart', (e) => {
+  if (e.touches.length !== 1 || !swipeAllowed(e.target)) { swipeTracking = false; return; }
+  swipeStartX = e.touches[0].clientX;
+  swipeStartY = e.touches[0].clientY;
+  swipeTracking = true;
+}, { passive: true });
+
+document.addEventListener('touchend', (e) => {
+  if (!swipeTracking) return;
+  swipeTracking = false;
+  const touch = e.changedTouches[0];
+  const dx = touch.clientX - swipeStartX;
+  const dy = touch.clientY - swipeStartY;
+  if (Math.abs(dx) < SWIPE_MIN_DIST || Math.abs(dy) > SWIPE_MAX_OFF_AXIS) return;
+  const idx = TAB_ORDER.indexOf(currentTab());
+  if (idx === -1) return;
+  if (dx < 0 && idx < TAB_ORDER.length - 1) setTab(TAB_ORDER[idx + 1]);
+  else if (dx > 0 && idx > 0) setTab(TAB_ORDER[idx - 1]);
+}, { passive: true });
+
+function currentTab() {
+  const active = qs('.tab.active');
+  return active ? active.dataset.tab : 'box';
+}
 
 /* ================= Recipe Box ================= */
 
@@ -1228,7 +1320,10 @@ async function loadGrocery() {
   });
   const frequent = Object.entries(counts).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1])
     .map(([k]) => k.charAt(0).toUpperCase() + k.slice(1));
-  state.quickAdd = [...new Set([...frequent, ...STARTER_STAPLES])].slice(0, 8);
+  const excluded = getQuickAddExclusions();
+  state.quickAdd = [...new Set([...frequent, ...STARTER_STAPLES])]
+    .filter(q => !excluded.has(q.trim().toLowerCase()))
+    .slice(0, 8);
   state.quickAddBy = lastAddedBy;
   drawGrocery();
 }
@@ -1249,6 +1344,11 @@ function drawGrocery() {
       const attributedId = (state.quickAddBy || {})[q.toLowerCase()];
       const badge = attributedId ? memberBadge(attributedId) : null;
       if (badge) { badge.classList.add('member-badge-chip'); c.appendChild(badge); }
+      attachLongPress(c, () => {
+        excludeFromQuickAdd(q);
+        toast(`"${q}" removed from Quick Add`);
+        loadGrocery();
+      });
       c.addEventListener('click', async () => { await addGroceryItem(q, null, null); drawGrocery(); });
       row.appendChild(c);
     });
