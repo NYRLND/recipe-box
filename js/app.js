@@ -1599,11 +1599,11 @@ function openPlanPickerFor(recipe, { tryout = false, moveEntry = null } = {}) {
 qs('#btn-plan').addEventListener('click', () => openPlanPickerFor(state.currentRecipe));
 qs('#plan-sheet-backdrop').addEventListener('click', () => closeSheet('plan-sheet', 'plan-sheet-backdrop'));
 
-// Freeform "quick note" plan entry — a day filled with plain text instead of a recipe,
+// Freeform "custom" plan entry — a day filled with plain text instead of a recipe,
 // for the nights that are just leftovers/sandwiches/order-in rather than a real recipe.
 function openQuickNoteSheet(day, existingEntry = null) {
   const input = qs('#plan-note-input');
-  qs('#plan-note-title').textContent = existingEntry ? 'Edit note' : 'Quick note';
+  qs('#plan-note-title').textContent = existingEntry ? 'Edit custom' : 'Custom';
   qs('#plan-note-day').textContent = `${formatDayLabel(day)} · ${formatDateSub(day)}`;
   input.value = existingEntry?.note || '';
   qs('#plan-note-delete').hidden = !existingEntry;
@@ -1641,7 +1641,6 @@ function openQuickNoteSheet(day, existingEntry = null) {
   setTimeout(() => input.focus(), 300);
 }
 qs('#plan-note-backdrop').addEventListener('click', () => closeSheet('plan-note-sheet', 'plan-note-backdrop'));
-qs('#plan-note-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') qs('#plan-note-save').click(); });
 
 function drawPlan() {
   const strip = qs('#day-strip');
@@ -1658,7 +1657,7 @@ function drawPlan() {
         slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;">${entry.recipes.title}${tryout ? ' <span style="font-size:0.62rem;color:var(--color-gold);font-weight:700;">TRYING IT</span>' : ''}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to open · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
         slot.querySelector('div').addEventListener('click', () => openDetail(entry.recipes.id));
       } else {
-        slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;font-style:italic;">${entry.note || 'Quick note'}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Quick note · tap to edit · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
+        slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;font-style:italic;">${entry.note || 'Custom'}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Custom · tap to edit · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
         slot.querySelector('div').addEventListener('click', () => openQuickNoteSheet(day, entry));
       }
       slot.querySelector('.slot-remove').addEventListener('click', async (e) => {
@@ -1682,7 +1681,7 @@ function drawPlan() {
       addLongPress(slot, () => openPlanPickerFor(null, { moveEntry: entry }));
     } else {
       slot.classList.add('empty-slot');
-      slot.innerHTML = `<button class="slot-choice" type="button">🍳<span>Recipe</span></button><div class="slot-divider"></div><button class="slot-choice" type="button">✎<span>Quick note</span></button>`;
+      slot.innerHTML = `<button class="slot-choice" type="button">🍳<span>Recipe</span></button><div class="slot-divider"></div><button class="slot-choice" type="button">✎<span>Custom</span></button>`;
       const [recipeBtn, noteBtn] = slot.querySelectorAll('.slot-choice');
       recipeBtn.addEventListener('click', () => { setTab('box'); toast('Pick a recipe, then "Add to plan"'); });
       noteBtn.addEventListener('click', () => openQuickNoteSheet(day));
