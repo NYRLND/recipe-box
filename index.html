@@ -289,6 +289,17 @@
   <div id="plan-sheet-days"></div>
 </div>
 
+<!-- QUICK NOTE SHEET (freeform plan entry, no recipe attached) -->
+<div class="sheet-backdrop" id="plan-note-backdrop"></div>
+<div class="sheet" id="plan-note-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:4px;" id="plan-note-title">Quick note</h3>
+  <div style="font-size:0.8rem;color:var(--color-ink-faint);margin-bottom:14px;" id="plan-note-day"></div>
+  <input class="search-input" id="plan-note-input" placeholder="e.g. Leftovers, sandwiches, order pizza…" maxlength="120">
+  <button class="btn btn-primary" id="plan-note-save" style="width:100%;margin-top:14px;">Save</button>
+  <button class="btn btn-secondary" id="plan-note-delete" style="width:100%;margin-top:10px;color:var(--color-danger);" hidden>Remove note</button>
+</div>
+
 <!-- RECIPE BOX LONG-PRESS ACTIONS -->
 <div class="sheet-backdrop" id="box-action-backdrop"></div>
 <div class="sheet" id="box-action-sheet">

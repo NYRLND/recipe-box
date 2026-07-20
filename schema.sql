@@ -86,3 +86,11 @@ create table if not exists grocery_history (
 alter table grocery_history enable row level security;
 drop policy if exists "allow all" on grocery_history;
 create policy "allow all" on grocery_history for all using (true) with check (true);
+
+-- v9: freeform "quick note" plan entries (e.g. "leftovers", "sandwiches") that don't
+-- reference a saved recipe. recipe_id was already nullable; this adds the text side.
+alter table meal_plan add column if not exists note text;
+
+-- v9b: aisle category, shared aisle-grouping convention with Hearth (added directly in
+-- Supabase before this line existed here — documenting it so schema.sql stays truthful).
+alter table grocery_items add column if not exists category text;

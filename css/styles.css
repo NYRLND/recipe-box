@@ -668,6 +668,25 @@ a { color: inherit; }
 .day-slot.filled { border-style: solid; background: var(--color-accent-wash); }
 .day-slot .plus { color: var(--color-ink-faint); font-size: 0.85rem; font-weight: 600; }
 
+.day-slot.empty-slot { padding: 0; cursor: default; }
+.slot-choice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 12px 8px;
+  background: none;
+  border: none;
+  color: var(--color-ink-faint);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.slot-choice span { font-size: 0.78rem; }
+.slot-divider { width: 1px; align-self: stretch; background: var(--color-line); }
+
 /* ---------- Cook mode ---------- */
 
 .cook-mode {

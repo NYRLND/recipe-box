@@ -1414,13 +1414,17 @@ function groceryRow(item) {
     ${item.amount ? `<div class="amt">${item.amount}</div>` : ''}`;
   const badge = memberBadge(item.added_by);
   if (badge) row.appendChild(badge);
-  row.querySelector('.check-circle').addEventListener('click', async (e) => {
+  row.querySelector('.check-circle').addEventListener('click', () => {
     const next = !item.checked;
     item.checked = next;
-    e.currentTarget.classList.toggle('checked', next);
-    row.classList.toggle('checked', next);
-    await supabase.from('grocery_items').update({ checked: next }).eq('id', item.id);
-    drawGrocery();
+    drawGrocery(); // instant local re-render (re-sorts checked items to the bottom); doesn't wait on the network
+    supabase.from('grocery_items').update({ checked: next }).eq('id', item.id).then(({ error }) => {
+      if (error) {
+        item.checked = !next; // revert if the write actually failed
+        toast("Couldn't save that — try again");
+        drawGrocery();
+      }
+    });
   });
   return row;
 }
@@ -1575,7 +1579,8 @@ function openPlanPickerFor(recipe, { tryout = false, moveEntry = null } = {}) {
   for (let o = 0; o <= Math.max(plan.endOffset, 6); o++) days.push(todayISO(o));
   days.forEach(day => {
     const occupied = state.planEntries[day];
-    const row = el('button', 'day-slot', `<div><div style="font-weight:700;">${formatDayLabel(day)}</div><div style="font-size:0.75rem;color:var(--color-ink-faint);">${formatDateSub(day)}${occupied ? ' · ' + occupied.recipes.title : ''}</div></div>`);
+    const occupiedLabel = occupied ? (occupied.recipe_id ? occupied.recipes.title : occupied.note) : '';
+    const row = el('button', 'day-slot', `<div><div style="font-weight:700;">${formatDayLabel(day)}</div><div style="font-size:0.75rem;color:var(--color-ink-faint);">${formatDateSub(day)}${occupied ? ' · ' + occupiedLabel : ''}</div></div>`);
     row.style.width = '100%';
     row.style.marginBottom = '10px';
     row.addEventListener('click', async () => {
@@ -1594,6 +1599,50 @@ function openPlanPickerFor(recipe, { tryout = false, moveEntry = null } = {}) {
 qs('#btn-plan').addEventListener('click', () => openPlanPickerFor(state.currentRecipe));
 qs('#plan-sheet-backdrop').addEventListener('click', () => closeSheet('plan-sheet', 'plan-sheet-backdrop'));
 
+// Freeform "quick note" plan entry — a day filled with plain text instead of a recipe,
+// for the nights that are just leftovers/sandwiches/order-in rather than a real recipe.
+function openQuickNoteSheet(day, existingEntry = null) {
+  const input = qs('#plan-note-input');
+  qs('#plan-note-title').textContent = existingEntry ? 'Edit note' : 'Quick note';
+  qs('#plan-note-day').textContent = `${formatDayLabel(day)} · ${formatDateSub(day)}`;
+  input.value = existingEntry?.note || '';
+  qs('#plan-note-delete').hidden = !existingEntry;
+
+  const save = async () => {
+    const text = input.value.trim();
+    if (!text) { input.focus(); return; }
+    closeSheet('plan-note-sheet', 'plan-note-backdrop');
+    if (existingEntry) {
+      await supabase.from('meal_plan').update({ note: text }).eq('id', existingEntry.id);
+    } else {
+      await supabase.from('meal_plan').delete().eq('planned_date', day);
+      await supabase.from('meal_plan').insert({ planned_date: day, note: text });
+      toast(`Added to ${formatDayLabel(day)}`);
+    }
+    if (!qs('#view-plan').hidden) loadPlan();
+  };
+  const del = async () => {
+    closeSheet('plan-note-sheet', 'plan-note-backdrop');
+    if (existingEntry) await supabase.from('meal_plan').delete().eq('id', existingEntry.id);
+    toast('Note removed');
+    if (!qs('#view-plan').hidden) loadPlan();
+  };
+
+  // avoid stacking listeners across repeated opens
+  const saveBtn = qs('#plan-note-save'), delBtn = qs('#plan-note-delete');
+  const newSaveBtn = saveBtn.cloneNode(true), newDelBtn = delBtn.cloneNode(true);
+  saveBtn.replaceWith(newSaveBtn); delBtn.replaceWith(newDelBtn);
+  newSaveBtn.textContent = 'Save';
+  newSaveBtn.addEventListener('click', save);
+  newDelBtn.hidden = !existingEntry;
+  newDelBtn.addEventListener('click', del);
+
+  openSheet('plan-note-sheet', 'plan-note-backdrop');
+  setTimeout(() => input.focus(), 300);
+}
+qs('#plan-note-backdrop').addEventListener('click', () => closeSheet('plan-note-sheet', 'plan-note-backdrop'));
+qs('#plan-note-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') qs('#plan-note-save').click(); });
+
 function drawPlan() {
   const strip = qs('#day-strip');
   strip.innerHTML = '';
@@ -1604,27 +1653,39 @@ function drawPlan() {
     const entry = state.planEntries[day];
     const slot = el('div', 'day-slot' + (entry ? ' filled' : ''));
     if (entry) {
-      const tryout = entry.recipes.in_box === false;
-      slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;">${entry.recipes.title}${tryout ? ' <span style="font-size:0.62rem;color:var(--color-gold);font-weight:700;">TRYING IT</span>' : ''}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to open · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
-      slot.querySelector('div').addEventListener('click', () => openDetail(entry.recipes.id));
+      if (entry.recipe_id && entry.recipes) {
+        const tryout = entry.recipes.in_box === false;
+        slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;">${entry.recipes.title}${tryout ? ' <span style="font-size:0.62rem;color:var(--color-gold);font-weight:700;">TRYING IT</span>' : ''}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to open · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
+        slot.querySelector('div').addEventListener('click', () => openDetail(entry.recipes.id));
+      } else {
+        slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;font-style:italic;">${entry.note || 'Quick note'}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Quick note · tap to edit · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
+        slot.querySelector('div').addEventListener('click', () => openQuickNoteSheet(day, entry));
+      }
       slot.querySelector('.slot-remove').addEventListener('click', async (e) => {
         e.stopPropagation();
         await supabase.from('meal_plan').delete().eq('id', entry.id);
-        // pull its unbought ingredients off the grocery list (bought ones stay)
-        const { data: removed } = await supabase.from('grocery_items').delete()
-          .eq('recipe_id', entry.recipe_id).eq('checked', false).select('id');
-        // a tryout that's no longer planned anywhere has no home — clean it up
-        if (entry.recipes.in_box === false) {
-          const { data: still } = await supabase.from('meal_plan').select('id').eq('recipe_id', entry.recipe_id);
-          if (!still?.length) await deleteRecipeEverywhere(entry.recipes);
+        if (entry.recipe_id) {
+          // pull its unbought ingredients off the grocery list (bought ones stay)
+          const { data: removed } = await supabase.from('grocery_items').delete()
+            .eq('recipe_id', entry.recipe_id).eq('checked', false).select('id');
+          // a tryout that's no longer planned anywhere has no home — clean it up
+          if (entry.recipes?.in_box === false) {
+            const { data: still } = await supabase.from('meal_plan').select('id').eq('recipe_id', entry.recipe_id);
+            if (!still?.length) await deleteRecipeEverywhere(entry.recipes);
+          }
+          if (removed?.length) toast(`Removed — and took ${removed.length} items off the grocery list`);
+        } else {
+          toast('Note removed');
         }
-        if (removed?.length) toast(`Removed — and took ${removed.length} items off the grocery list`);
         loadPlan();
       });
       addLongPress(slot, () => openPlanPickerFor(null, { moveEntry: entry }));
     } else {
-      slot.innerHTML = `<span class="plus">+ Choose a recipe</span>`;
-      slot.addEventListener('click', () => { setTab('box'); toast('Pick a recipe, then "Add to plan"'); });
+      slot.classList.add('empty-slot');
+      slot.innerHTML = `<button class="slot-choice" type="button">🍳<span>Recipe</span></button><div class="slot-divider"></div><button class="slot-choice" type="button">✎<span>Quick note</span></button>`;
+      const [recipeBtn, noteBtn] = slot.querySelectorAll('.slot-choice');
+      recipeBtn.addEventListener('click', () => { setTab('box'); toast('Pick a recipe, then "Add to plan"'); });
+      noteBtn.addEventListener('click', () => openQuickNoteSheet(day));
     }
     card.appendChild(slot);
     strip.appendChild(card);
