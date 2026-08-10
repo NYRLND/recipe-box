@@ -20,6 +20,25 @@
 <body>
 <div id="app">
 
+  <!-- LOGIN -->
+  <div class="onboard view" id="view-login" hidden>
+    <div class="mark"><img src="icons/icon-512.png" alt=""></div>
+    <h1>Recipe Box</h1>
+    <p>Sign in to your shared recipe box.</p>
+    <form id="login-form" style="width:100%;max-width:320px;text-align:left;">
+      <div class="field">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" autocomplete="current-password" required>
+      </div>
+      <p id="login-error" style="color:var(--color-danger);font-size:0.85rem;min-height:1.2em;margin-top:10px;"></p>
+      <button type="submit" class="btn" id="login-submit" style="width:100%;margin-top:6px;">Sign in</button>
+    </form>
+  </div>
+
   <!-- ONBOARDING -->
   <div class="onboard view" id="view-onboard" hidden>
     <div class="mark"><img src="icons/icon-512.png" alt=""></div>

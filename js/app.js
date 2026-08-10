@@ -268,6 +268,39 @@ async function boot() {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    showLogin();
+    return;
+  }
+
+  await afterAuth();
+}
+
+function showLogin() {
+  showView('view-login');
+  const form = qs('#login-form');
+  const errEl = qs('#login-error');
+  const submitBtn = qs('#login-submit');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.textContent = '';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Signing in…';
+    const email = qs('#login-email').value.trim();
+    const password = qs('#login-password').value;
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Sign in';
+    if (error) {
+      errEl.textContent = 'Incorrect email or password.';
+      return;
+    }
+    await afterAuth();
+  });
+}
+
+async function afterAuth() {
   const { data: members } = await supabase.from('household_members').select('*');
   state.members = members || [];
 
