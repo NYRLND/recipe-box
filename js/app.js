@@ -216,6 +216,7 @@ const state = {
   cookIndex: 0,
   timerInterval: null,
   shareTargetRecipe: null,
+  shareQueue: [],       // recipe_shares waiting for the current member, unviewed
 };
 
 /* ================= View routing (history-aware: phone back button navigates, doesn't exit) ================= */
@@ -328,9 +329,13 @@ function startApp() {
   qs('#topbar').hidden = false;
   qs('#tabbar').hidden = false;
   qs('#who-badge').textContent = state.member.name[0];
+  qs('#who-badge').title = 'Tap to switch who\'s cooking · hold to change your password';
   qs('#topbar-title').textContent = greeting();
   setTab('box');
+  checkPendingShares();
 }
+
+attachLongPress(qs('#who-badge'), () => openSheet('profile-sheet', 'profile-sheet-backdrop'));
 
 function greeting() {
   const h = new Date().getHours();
@@ -348,6 +353,7 @@ qs('#who-badge').addEventListener('click', () => {
   qs('#topbar-title').textContent = greeting();
   toast(`Switched to ${other.name}`);
   loadFavorites().then(renderBox);
+  checkPendingShares();
 });
 
 qsa('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
@@ -522,6 +528,155 @@ qs('#box-act-delete').addEventListener('click', async () => {
   if (err) return toast(`Could not delete: ${err.message}`);
   toast('Removed');
   renderBox();
+});
+
+/* ---- Share with a household member (independent copy, not a live link) ---- */
+
+let memberShareTarget = null;
+let memberShareSelected = new Set();
+
+qs('#box-act-share-member').addEventListener('click', () => {
+  closeSheet('box-action-sheet', 'box-action-backdrop');
+  if (boxActionTarget) openMemberShareSheet(boxActionTarget);
+});
+
+async function openMemberShareSheet(recipe) {
+  memberShareTarget = recipe;
+  memberShareSelected = new Set();
+  qs('#member-share-recipe-title').textContent = recipe.title;
+  const list = qs('#member-share-list');
+  list.innerHTML = '<div class="chip" style="opacity:.6;">Loading…</div>';
+  openSheet('member-share-sheet', 'member-share-backdrop');
+  const { data, error } = await supabase.rpc('list_shareable_members');
+  list.innerHTML = '';
+  if (error || !data?.length) {
+    list.innerHTML = '<p style="color:var(--color-ink-faint);font-size:0.85rem;">No one else to share with yet.</p>';
+    return;
+  }
+  data.forEach(m => {
+    const c = el('button', 'chip', `${m.name} <span style="opacity:.6;">· ${m.household_name}</span>`);
+    c.addEventListener('click', () => {
+      c.classList.toggle('active');
+      if (memberShareSelected.has(m.id)) memberShareSelected.delete(m.id);
+      else memberShareSelected.add(m.id);
+    });
+    list.appendChild(c);
+  });
+}
+
+qs('#member-share-backdrop').addEventListener('click', () => closeSheet('member-share-sheet', 'member-share-backdrop'));
+
+qs('#member-share-send').addEventListener('click', async () => {
+  if (!memberShareTarget) return;
+  if (!memberShareSelected.size) return toast('Pick at least one person');
+  const r = memberShareTarget;
+  const snapshot = {
+    title: r.title, source: r.source, source_url: r.source_url, image_url: r.image_url,
+    servings: r.servings, prep_time: r.prep_time, cook_time: r.cook_time,
+    ingredients: r.ingredients || [], steps: r.steps || [], tags: r.tags || [],
+    rating: r.rating || null, rating_count: r.rating_count || null,
+    notes: r.notes || '', shared_by_name: state.member.name,
+  };
+  const rows = [...memberShareSelected].map(id => ({ recipe_snapshot: snapshot, shared_by: state.member.id, shared_with: id }));
+  const { error } = await supabase.from('recipe_shares').insert(rows);
+  closeSheet('member-share-sheet', 'member-share-backdrop');
+  if (error) return toast('Could not share — try again');
+  toast(`Shared with ${memberShareSelected.size} ${memberShareSelected.size > 1 ? 'people' : 'person'}`);
+});
+
+/* ---- Shares waiting for the current member: splash + app badge ---- */
+
+async function checkPendingShares() {
+  const { data } = await supabase.from('recipe_shares').select('*')
+    .eq('shared_with', state.member.id).is('viewed_at', null).order('created_at', { ascending: true });
+  state.shareQueue = data || [];
+  updateShareBadge();
+  if (state.shareQueue.length) showShareSplash(state.shareQueue[0]);
+}
+
+function updateShareBadge() {
+  const n = state.shareQueue?.length || 0;
+  if (!('setAppBadge' in navigator)) return;
+  if (n > 0) navigator.setAppBadge(n).catch(() => {});
+  else navigator.clearAppBadge?.().catch(() => {});
+}
+
+function showShareSplash(share) {
+  const snap = share.recipe_snapshot || {};
+  qs('#share-splash-from').textContent = `Shared by ${snap.shared_by_name || 'a family member'}`;
+  qs('#share-splash-title').textContent = snap.title || 'Untitled recipe';
+  qs('#share-splash-thumb').style.backgroundImage = snap.image_url ? `url('${snap.image_url}')` : 'none';
+  const lines = (snap.notes || '').split('\n').map(s => s.trim()).filter(Boolean);
+  qs('#share-splash-notes-label').hidden = !lines.length;
+  const notesBox = qs('#share-splash-notes');
+  notesBox.innerHTML = '';
+  lines.forEach(l => notesBox.appendChild(el('div', 'note-card', l)));
+  const remaining = state.shareQueue.length - 1;
+  qs('#share-splash-queue-note').textContent = remaining > 0 ? `+${remaining} more waiting` : '';
+  openSheet('share-splash', 'share-splash-backdrop');
+}
+
+async function resolveShare(share, action) {
+  await supabase.from('recipe_shares').update({ viewed_at: new Date().toISOString(), responded_action: action }).eq('id', share.id);
+  state.shareQueue = state.shareQueue.filter(s => s.id !== share.id);
+  updateShareBadge();
+  closeSheet('share-splash', 'share-splash-backdrop');
+  if (state.shareQueue.length) setTimeout(() => showShareSplash(state.shareQueue[0]), 320);
+}
+
+async function insertRecipeFromSnapshot(snap, inBox) {
+  const { data, error } = await supabase.from('recipes').insert({
+    title: snap.title, source: snap.source, source_url: snap.source_url || null, image_url: snap.image_url,
+    servings: snap.servings || 4, prep_time: snap.prep_time, cook_time: snap.cook_time,
+    ingredients: snap.ingredients || [], steps: snap.steps || [], tags: snap.tags || [],
+    rating: snap.rating || null, rating_count: snap.rating_count || null,
+    notes: snap.notes || '', created_by: state.member.id, parent_recipe_id: null, in_box: inBox,
+  }).select().single();
+  if (error) throw new Error('save failed');
+  return data;
+}
+
+qs('#share-splash-backdrop').addEventListener('click', () => { if (state.shareQueue?.length) resolveShare(state.shareQueue[0], null); });
+qs('#share-splash-dismiss').addEventListener('click', () => { if (state.shareQueue?.length) resolveShare(state.shareQueue[0], null); });
+qs('#share-splash-box').addEventListener('click', async () => {
+  const share = state.shareQueue?.[0];
+  if (!share) return;
+  try {
+    await insertRecipeFromSnapshot(share.recipe_snapshot, true);
+    await resolveShare(share, 'box');
+    await renderBox();
+    toast('Added to your Recipe Box');
+  } catch (e) { toast('Could not save — try again'); }
+});
+qs('#share-splash-plan').addEventListener('click', async () => {
+  const share = state.shareQueue?.[0];
+  if (!share) return;
+  try {
+    const rec = await insertRecipeFromSnapshot(share.recipe_snapshot, false);
+    await resolveShare(share, 'plan');
+    openPlanPickerFor(rec, { tryout: true });
+  } catch (e) { toast('Could not save — try again'); }
+});
+
+/* ---- Change password ---- */
+
+qs('#profile-sheet-backdrop').addEventListener('click', () => closeSheet('profile-sheet', 'profile-sheet-backdrop'));
+qs('#profile-password-save').addEventListener('click', async () => {
+  const p1 = qs('#profile-new-password').value;
+  const p2 = qs('#profile-confirm-password').value;
+  const err = qs('#profile-password-error');
+  err.textContent = '';
+  if (p1.length < 6) { err.textContent = 'Password must be at least 6 characters.'; return; }
+  if (p1 !== p2) { err.textContent = "Passwords don't match."; return; }
+  const btn = qs('#profile-password-save');
+  btn.disabled = true; btn.textContent = 'Updating…';
+  const { error } = await supabase.auth.updateUser({ password: p1 });
+  btn.disabled = false; btn.textContent = 'Update password';
+  if (error) { err.textContent = 'Could not update password — try again.'; return; }
+  qs('#profile-new-password').value = '';
+  qs('#profile-confirm-password').value = '';
+  closeSheet('profile-sheet', 'profile-sheet-backdrop');
+  toast('Password updated');
 });
 
 async function deleteRecipeEverywhere(r) {

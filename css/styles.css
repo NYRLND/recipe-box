@@ -810,6 +810,49 @@ textarea.search-input.textarea-note {
   border-radius: 4px; margin: 8px auto 14px;
 }
 
+/* ---------- Shared-recipe splash ---------- */
+
+.share-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 170;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.96);
+  transition: opacity 220ms, transform 220ms cubic-bezier(.32,.72,0,1);
+}
+.share-splash.show { opacity: 1; pointer-events: auto; transform: scale(1); }
+.share-splash-card {
+  background: var(--color-surface);
+  border-radius: var(--radius-l, 20px);
+  padding: 22px;
+  width: 100%;
+  max-width: 380px;
+  max-height: 82vh;
+  overflow-y: auto;
+}
+.share-splash-thumb {
+  width: 100%; height: 140px;
+  border-radius: var(--radius-m);
+  background: var(--color-accent-wash) center/cover no-repeat;
+  margin-bottom: 14px;
+}
+.share-splash-eyebrow {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--color-gold); margin-bottom: 4px;
+}
+.share-splash-notes-label {
+  font-size: 0.78rem; font-weight: 700; color: var(--color-ink-faint);
+  margin-top: 16px; margin-bottom: 4px;
+}
+.share-splash-queue-note {
+  text-align: center; font-size: 0.75rem; color: var(--color-ink-faint); margin-top: 10px;
+}
+
 /* ---------- Empty states ---------- */
 
 .empty-state {
