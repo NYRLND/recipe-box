@@ -262,6 +262,59 @@ function setTab(tab) {
   if (tab !== 'box') pushNav({ v: 'tab', tab });
 }
 
+/* ================= Tour (shown once per device, on first "who's cooking" pick) ================= */
+
+const TOUR_STEPS = [
+  { icon: '🍲', title: 'Welcome to Recipe Box', body: "Your household's shared recipe box, meal plan, and grocery list — everyone at home sees the same one." },
+  { icon: '🔗', title: 'Import from anywhere', body: 'Tap + and paste a link from almost any recipe blog — Recipe Box pulls in the ingredients, steps, and photo. Or add one by hand.' },
+  { icon: '✋', title: 'Hold for more', body: 'Long-press any recipe card for quick actions — add it to the plan, add its ingredients to the grocery list, or share it.' },
+  { icon: '📅', title: 'Plan your week', body: 'Drop recipes onto days in the Meal Plan tab, or tap "Fill my plan" and let it pick for you.' },
+  { icon: '🛒', title: 'One grocery list', body: 'Planning a recipe can add its ingredients straight to the Grocery List, organized by aisle.' },
+  { icon: '🎁', title: 'Share with family', body: "Long-press a recipe → Share with someone on the app to send it to family in another household. They'll see it next time they open the app." },
+];
+
+let tourStep = 0;
+let tourDoneCallback = null;
+
+function showTour(onDone) {
+  tourStep = 0;
+  tourDoneCallback = onDone || null;
+  renderTourStep();
+  openSheet('tour-splash', 'tour-backdrop');
+}
+
+function renderTourStep() {
+  const step = TOUR_STEPS[tourStep];
+  qs('#tour-icon').textContent = step.icon;
+  qs('#tour-title').textContent = step.title;
+  qs('#tour-body').textContent = step.body;
+  const dots = qs('#tour-dots');
+  dots.innerHTML = '';
+  TOUR_STEPS.forEach((_, i) => dots.appendChild(el('span', 'tour-dot' + (i === tourStep ? ' active' : ''))));
+  const last = tourStep === TOUR_STEPS.length - 1;
+  qs('#tour-next').textContent = last ? "Let's cook" : 'Next';
+  qs('#tour-skip').hidden = last;
+}
+
+function finishTour() {
+  localStorage.setItem('t42_tour_seen', '1');
+  closeSheet('tour-splash', 'tour-backdrop');
+  const cb = tourDoneCallback;
+  tourDoneCallback = null;
+  if (cb) cb();
+}
+
+qs('#tour-next').addEventListener('click', () => {
+  if (tourStep < TOUR_STEPS.length - 1) { tourStep++; renderTourStep(); }
+  else finishTour();
+});
+qs('#tour-skip').addEventListener('click', finishTour);
+qs('#tour-backdrop').addEventListener('click', finishTour);
+qs('#profile-replay-tour').addEventListener('click', () => {
+  closeSheet('profile-sheet', 'profile-sheet-backdrop');
+  showTour();
+});
+
 /* ================= Boot ================= */
 
 async function boot() {
@@ -315,7 +368,8 @@ async function afterAuth() {
       b.addEventListener('click', () => {
         state.member = m;
         localStorage.setItem('t42_member', JSON.stringify(m));
-        startApp();
+        if (localStorage.getItem('t42_tour_seen')) startApp();
+        else showTour(startApp);
       });
       picker.appendChild(b);
     });
