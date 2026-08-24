@@ -327,7 +327,53 @@
   <button class="btn btn-secondary" id="box-act-plan" style="width:100%;margin-bottom:10px;justify-content:flex-start;">📅 Add to plan</button>
   <button class="btn btn-secondary" id="box-act-grocery" style="width:100%;margin-bottom:10px;justify-content:flex-start;">🛒 Add ingredients to grocery list</button>
   <button class="btn btn-secondary" id="box-act-share" style="width:100%;margin-bottom:10px;justify-content:flex-start;">💬 Share recipe</button>
+  <button class="btn btn-secondary" id="box-act-share-member" style="width:100%;margin-bottom:10px;justify-content:flex-start;">🎁 Share with someone on the app</button>
   <button class="btn btn-secondary" id="box-act-delete" style="width:100%;justify-content:flex-start;color:var(--color-danger);">🗑 Remove from box</button>
+</div>
+
+<!-- SHARE WITH HOUSEHOLD MEMBER SHEET -->
+<div class="sheet-backdrop" id="member-share-backdrop"></div>
+<div class="sheet" id="member-share-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:4px;">Share with…</h3>
+  <p style="color:var(--color-ink-soft);font-size:0.82rem;margin-bottom:14px;" id="member-share-recipe-title"></p>
+  <div class="chip-row" id="member-share-list" style="flex-wrap:wrap;overflow:visible;"></div>
+  <button class="btn btn-primary" id="member-share-send" style="width:100%;margin-top:16px;">Send</button>
+</div>
+
+<!-- SHARED-RECIPE SPLASH (shown on login when there's something waiting) -->
+<div class="sheet-backdrop" id="share-splash-backdrop"></div>
+<div class="share-splash" id="share-splash">
+  <div class="share-splash-card">
+    <div class="share-splash-thumb" id="share-splash-thumb"></div>
+    <div class="share-splash-eyebrow" id="share-splash-from"></div>
+    <h2 id="share-splash-title"></h2>
+    <p class="share-splash-notes-label" id="share-splash-notes-label" hidden>Their notes:</p>
+    <div id="share-splash-notes"></div>
+    <div class="action-row">
+      <button class="btn btn-secondary" id="share-splash-box">☆ Add to Box</button>
+      <button class="btn btn-secondary" id="share-splash-plan">📅 Add to Plan</button>
+    </div>
+    <button class="btn btn-ghost" id="share-splash-dismiss" style="width:100%;margin-top:8px;">Not now</button>
+    <div class="share-splash-queue-note" id="share-splash-queue-note"></div>
+  </div>
+</div>
+
+<!-- PROFILE / CHANGE PASSWORD SHEET -->
+<div class="sheet-backdrop" id="profile-sheet-backdrop"></div>
+<div class="sheet" id="profile-sheet">
+  <div class="sheet-handle"></div>
+  <h3 style="margin-bottom:14px;">Change password</h3>
+  <div class="field">
+    <label for="profile-new-password">New password</label>
+    <input type="password" id="profile-new-password" autocomplete="new-password" minlength="6">
+  </div>
+  <div class="field">
+    <label for="profile-confirm-password">Confirm new password</label>
+    <input type="password" id="profile-confirm-password" autocomplete="new-password" minlength="6">
+  </div>
+  <p id="profile-password-error" style="color:var(--color-danger);font-size:0.85rem;min-height:1.2em;margin-top:8px;"></p>
+  <button class="btn btn-primary" id="profile-password-save" style="width:100%;margin-top:6px;">Update password</button>
 </div>
 
 <!-- SOURCE FILTER SHEET -->
