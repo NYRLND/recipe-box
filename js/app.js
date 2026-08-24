@@ -197,7 +197,7 @@ function excludeFromQuickAdd(name) {
 /* ================= State ================= */
 
 const state = {
-  member: JSON.parse(localStorage.getItem('t42_member') || 'null'),
+  member: null,  // resolved from the signed-in session in afterAuth() — never cached/switchable
   members: [],
   recipes: [],
   favorites: new Set(),
@@ -336,6 +336,8 @@ function showLogin() {
   const form = qs('#login-form');
   const errEl = qs('#login-error');
   const submitBtn = qs('#login-submit');
+  const carriedError = sessionStorage.getItem('t42_login_error');
+  if (carriedError) { errEl.textContent = carriedError; sessionStorage.removeItem('t42_login_error'); }
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errEl.textContent = '';
@@ -354,28 +356,27 @@ function showLogin() {
   });
 }
 
+// Identity comes entirely from who's actually signed in — there is no
+// separate "pick a name" step or way to switch to someone else's identity
+// from the same device. Each person has their own phone and their own
+// login; current_member_id() (server-side, tied to auth.uid()) is the only
+// source of truth for "which household_members row is this."
 async function afterAuth() {
   const { data: members } = await supabase.from('household_members').select('*');
   state.members = members || [];
 
-  if (!state.member) {
-    showView('view-onboard');
-    const picker = qs('#who-picker');
-    picker.innerHTML = '';
-    const names = state.members.length ? state.members : [{ id: null, name: 'Dan' }, { id: null, name: 'Melissa' }];
-    names.forEach(m => {
-      const b = el('button', null, m.name);
-      b.addEventListener('click', () => {
-        state.member = m;
-        localStorage.setItem('t42_member', JSON.stringify(m));
-        if (localStorage.getItem('t42_tour_seen')) startApp();
-        else showTour(startApp);
-      });
-      picker.appendChild(b);
-    });
+  const { data: myId, error } = await supabase.rpc('current_member_id');
+  const me = !error && myId ? state.members.find(m => m.id === myId) : null;
+  if (!me) {
+    await supabase.auth.signOut();
+    sessionStorage.setItem('t42_login_error', "This account isn't linked to a household member yet — check with whoever manages the household.");
+    location.reload();
     return;
   }
-  startApp();
+  state.member = me;
+
+  if (localStorage.getItem('t42_tour_seen')) startApp();
+  else showTour(startApp);
 }
 
 function startApp() {
@@ -383,32 +384,19 @@ function startApp() {
   qs('#topbar').hidden = false;
   qs('#tabbar').hidden = false;
   qs('#who-badge').textContent = state.member.name[0];
-  qs('#who-badge').title = 'Tap to switch who\'s cooking · hold to change your password';
+  qs('#who-badge').title = 'Account settings';
   qs('#topbar-title').textContent = greeting();
   setTab('box');
   checkPendingShares();
 }
 
-attachLongPress(qs('#who-badge'), () => openSheet('profile-sheet', 'profile-sheet-backdrop'));
+qs('#who-badge').addEventListener('click', () => openSheet('profile-sheet', 'profile-sheet-backdrop'));
 
 function greeting() {
   const h = new Date().getHours();
   const part = h < 11 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
   return `Good ${part}, ${state.member.name}`;
 }
-
-qs('#who-badge').addEventListener('click', () => {
-  if (!state.members.length) return;
-  const idx = state.members.findIndex(m => m.name === state.member.name);
-  const other = state.members[(idx + 1) % state.members.length];
-  state.member = other;
-  localStorage.setItem('t42_member', JSON.stringify(other));
-  qs('#who-badge').textContent = other.name[0];
-  qs('#topbar-title').textContent = greeting();
-  toast(`Switched to ${other.name}`);
-  loadFavorites().then(renderBox);
-  checkPendingShares();
-});
 
 qsa('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
 
