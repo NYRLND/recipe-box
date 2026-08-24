@@ -248,3 +248,15 @@ $$;
 revoke execute on function list_shareable_members() from public;
 revoke execute on function list_shareable_members() from anon;
 grant execute on function list_shareable_members() to authenticated;
+
+-- v13: household_members' old "members readable" policy (anon+authenticated,
+-- using(true)) was fine while every member was in one household, but would
+-- expose kid_pin/auth_user_id to other households' Recipe Box accounts once
+-- Martin/Maloy exist. Narrowed to same-household; cross-household sharing
+-- already goes through list_shareable_members() (name + household only).
+drop policy if exists "members readable" on household_members;
+create policy "own household members readable" on household_members
+  for select to authenticated
+  using (household_id = (select my_household_id()));
+
+alter table household_members alter column household_id set not null;
