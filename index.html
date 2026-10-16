@@ -16,6 +16,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&family=Caveat:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
+<link rel="modulepreload" href="js/app.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/+esm" crossorigin>
 </head>
 <body>
 <div id="app">
@@ -382,6 +384,7 @@
   </div>
   <p id="profile-password-error" style="color:var(--color-danger);font-size:0.85rem;min-height:1.2em;margin-top:8px;"></p>
   <button class="btn btn-primary" id="profile-password-save" style="width:100%;margin-top:6px;">Update password</button>
+  <button class="btn btn-ghost" id="profile-sign-out" style="width:100%;margin-top:18px;color:var(--color-danger);">Sign out</button>
 </div>
 
 <!-- SOURCE FILTER SHEET -->
@@ -389,7 +392,7 @@
 <div class="sheet" id="sources-sheet">
   <div class="sheet-handle"></div>
   <h3 style="margin-bottom:4px;">Browse which sources?</h3>
-  <p style="color:var(--color-ink-soft);font-size:0.85rem;margin-bottom:12px;">Pick a few of her favorites, or leave all on.</p>
+  <p style="color:var(--color-ink-soft);font-size:0.85rem;margin-bottom:12px;">Pick a few favorites, or leave all on.</p>
   <div class="chip-row" id="sources-chip-list" style="flex-wrap:wrap;overflow:visible;"></div>
   <div class="action-row">
     <button class="btn btn-secondary" id="sources-clear">All sources</button>

@@ -1,5 +1,5 @@
 import { supabase } from './supabase-client.js';
-import { IMPORT_RECIPE_FN, SUPABASE_ANON_KEY } from './config.js';
+import { IMPORT_RECIPE_FN, SUPABASE_ANON_KEY, SUPABASE_URL } from './config.js';
 
 /* ================= Utilities ================= */
 
@@ -15,10 +15,31 @@ function toast(msg) {
   toast._h = setTimeout(() => t.classList.remove('show'), 2200);
 }
 
+// Escape text for innerHTML. Recipe text comes from scraped sites and from other
+// households' shares, so it must never be parsed as markup. Entities are decoded
+// first so scraped "&amp;" still shows as "&" (innerHTML used to do that for us).
+function esc(s) {
+  return decodeHtmlEntities(String(s ?? ''))
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Only http(s) links/images — a javascript: URL in a scraped or shared recipe must not be clickable.
+function safeUrl(u) {
+  return /^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '';
+}
+
+function bgImage(u) {
+  const safe = safeUrl(u);
+  return safe ? `url("${safe.replace(/["\\\n\r]/g, encodeURIComponent)}")` : 'none';
+}
+
+// Local calendar date. toISOString() is UTC, which made "Today" flip to
+// tomorrow every evening in US time zones (after 8pm Eastern).
 function todayISO(offsetDays = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function formatDayLabel(iso) {
@@ -219,6 +240,50 @@ const state = {
   shareQueue: [],       // recipe_shares waiting for the current member, unviewed
 };
 
+/* ================= Local snapshots (instant paint, same idea as Hearth) ================= */
+// Each screen paints from the last copy saved on this phone, then refreshes from
+// Supabase. Keyed by member so a shared device can never show one household's
+// data to another, and wiped on sign-out. A failed fetch keeps the snapshot —
+// no signal must never read as "your recipe box is empty".
+
+const SNAP_PREFIX = 'rb_snap_';
+const ME_KEY = 'rb_me';
+const AUTH_KEY = `sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
+
+function snapKey(k) { return `${SNAP_PREFIX}${state.member?.id || 'none'}_${k}`; }
+function readSnap(k) { try { return JSON.parse(localStorage.getItem(snapKey(k)) || 'null'); } catch { return null; } }
+function writeSnap(k, v) { try { localStorage.setItem(snapKey(k), JSON.stringify(v)); } catch {} }
+function clearLocalData() {
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith(SNAP_PREFIX) || k === ME_KEY || k === 'rb_disc_cache')
+      .forEach(k => localStorage.removeItem(k));
+  } catch {}
+}
+
+// The session supabase-js keeps in localStorage. Read directly so launch never
+// waits on getSession(), which can stall ~25s refreshing an expired token with
+// no signal (the Hearth v185 bug) before giving up and showing the login screen.
+function storedSession() {
+  try { const s = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); return s?.user?.id ? s : null; }
+  catch { return null; }
+}
+
+function readCachedMe() {
+  try { return JSON.parse(localStorage.getItem(ME_KEY) || 'null'); } catch { return null; }
+}
+
+function hydrateFromSnapshots() {
+  const recipes = readSnap('recipes');
+  if (recipes) { setRecipes(recipes); state.recipesLoaded = true; }
+  const favs = readSnap('favorites');
+  if (favs) state.favorites = new Set(favs);
+  const grocery = readSnap('grocery');
+  if (grocery) { state.groceryItems = grocery.items || []; state.quickAdd = grocery.quickAdd || []; state.groceryLoaded = true; }
+  const planSnap = readSnap('plan');
+  if (planSnap) { state.planEntries = planSnap; state.planLoaded = true; }
+}
+
 /* ================= View routing (history-aware: phone back button navigates, doesn't exit) ================= */
 
 let navSuppress = false;
@@ -322,6 +387,26 @@ async function boot() {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 
+  // A refresh token that's been revoked or expired for good signs out here —
+  // send them back to the login screen with nothing of theirs left on the phone.
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT' && state.member) { clearLocalData(); location.reload(); }
+  });
+
+  // Returning user on this phone: open straight into the app from the saved
+  // identity + snapshots, then confirm the account with the server behind it.
+  const stored = storedSession();
+  const cached = readCachedMe();
+  if (stored && cached?.member && cached.authUserId === stored.user.id) {
+    state.member = cached.member;
+    state.members = cached.members || [];
+    hydrateFromSnapshots();
+    if (localStorage.getItem('t42_tour_seen')) enterApp();
+    else showTour(enterApp);
+    afterAuth({ background: true });
+    return;
+  }
+
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
     showLogin();
@@ -331,13 +416,18 @@ async function boot() {
   await afterAuth();
 }
 
-function showLogin() {
+let loginWired = false;
+
+function showLogin(message) {
   showView('view-login');
   const form = qs('#login-form');
   const errEl = qs('#login-error');
   const submitBtn = qs('#login-submit');
   const carriedError = sessionStorage.getItem('t42_login_error');
   if (carriedError) { errEl.textContent = carriedError; sessionStorage.removeItem('t42_login_error'); }
+  if (message) errEl.textContent = message;
+  if (loginWired) return;
+  loginWired = true;
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errEl.textContent = '';
@@ -361,25 +451,53 @@ function showLogin() {
 // from the same device. Each person has their own phone and their own
 // login; current_member_id() (server-side, tied to auth.uid()) is the only
 // source of truth for "which household_members row is this."
-async function afterAuth() {
-  const { data: members } = await supabase.from('household_members').select('*');
-  state.members = members || [];
+//
+// background: the app is already open from the cached identity; this only
+// re-checks it. A network failure is never treated as "not linked" — that used
+// to sign people out whenever they opened the app with a weak signal.
+async function afterAuth({ background = false } = {}) {
+  const [membersRes, meRes] = await Promise.all([
+    // only what the app shows — household_members also carries Hearth's kid_pin
+    supabase.from('household_members').select('id, name, household_id'),
+    supabase.rpc('current_member_id'),
+  ]);
 
-  const { data: myId, error } = await supabase.rpc('current_member_id');
-  const me = !error && myId ? state.members.find(m => m.id === myId) : null;
+  if (membersRes.error || meRes.error) {
+    if (background) return;   // keep going on the cached identity; snapshots are on screen
+    showLogin("Couldn't reach Recipe Box — check your connection and try again.");
+    return;
+  }
+
+  state.members = membersRes.data || [];
+  const me = meRes.data ? state.members.find(m => m.id === meRes.data) : null;
   if (!me) {
-    await supabase.auth.signOut();
     sessionStorage.setItem('t42_login_error', "This account isn't linked to a household member yet — check with whoever manages the household.");
+    clearLocalData();
+    state.member = null;
+    await supabase.auth.signOut({ scope: 'local' });
     location.reload();
     return;
   }
-  state.member = me;
 
-  if (localStorage.getItem('t42_tour_seen')) startApp();
-  else showTour(startApp);
+  const switched = state.member && state.member.id !== me.id;
+  state.member = me;
+  try {
+    localStorage.setItem(ME_KEY, JSON.stringify({ authUserId: storedSession()?.user?.id, member: me, members: state.members }));
+  } catch {}
+
+  if (background) {
+    if (switched) { clearLocalData(); location.reload(); return; }
+    qs('#who-badge').textContent = me.name[0];
+    qs('#topbar-title').textContent = greeting();
+    return;
+  }
+
+  hydrateFromSnapshots();
+  if (localStorage.getItem('t42_tour_seen')) enterApp();
+  else showTour(enterApp);
 }
 
-function startApp() {
+function enterApp() {
   history.replaceState({ v: 'tab', tab: 'box' }, '');
   qs('#topbar').hidden = false;
   qs('#tabbar').hidden = false;
@@ -449,24 +567,48 @@ function currentTab() {
 
 /* ================= Recipe Box ================= */
 
+// Each loader returns true when the data actually changed, so screens only
+// redraw (and lose scroll position) when there's something new to show.
+// On a failed fetch they keep what's already there.
+let favoritesJson = null, recipesJson = null;
+
 async function loadFavorites() {
-  if (!state.member?.id) return;
-  const { data } = await supabase.from('favorites').select('recipe_id').eq('member_id', state.member.id);
-  state.favorites = new Set((data || []).map(r => r.recipe_id));
+  if (!state.member?.id) return false;
+  const { data, error } = await supabase.from('favorites').select('recipe_id').eq('member_id', state.member.id);
+  if (error) return false;
+  const ids = data.map(r => r.recipe_id);
+  const json = JSON.stringify(ids);
+  if (json === favoritesJson) return false;
+  favoritesJson = json;
+  state.favorites = new Set(ids);
+  writeSnap('favorites', ids);
+  return true;
 }
 
-async function loadRecipes() {
-  const { data } = await supabase.from('recipes').select('*').order('created_at', { ascending: false });
-  state.recipes = data || [];
+function setRecipes(rows) {
+  state.recipes = rows;
   const tagCounts = {};
   state.recipes.filter(r => r.in_box !== false).forEach(r => (r.tags || []).forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
   state.tags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).map(([t]) => t);
 }
 
+async function loadRecipes() {
+  const { data, error } = await supabase.from('recipes').select('*').order('created_at', { ascending: false });
+  if (error) return false;
+  const json = JSON.stringify(data);
+  if (json === recipesJson) return false;
+  recipesJson = json;
+  setRecipes(data);
+  state.recipesLoaded = true;
+  writeSnap('recipes', data);
+  return true;
+}
+
 async function renderBox() {
-  await Promise.all([loadRecipes(), loadFavorites()]);
-  renderTagChips();
-  drawGrid();
+  // paint what we already have right away, then refresh behind it
+  if (state.recipesLoaded) { renderTagChips(); drawGrid(); }
+  const [recipesChanged, favsChanged] = await Promise.all([loadRecipes(), loadFavorites()]);
+  if (state.recipesLoaded && (recipesChanged || favsChanged || !qs('#recipe-grid').children.length)) { renderTagChips(); drawGrid(); }
 }
 
 let tagsExpanded = false;
@@ -487,7 +629,7 @@ function renderTagChips() {
   }
 
   tags.forEach(tag => {
-    const c = el('button', 'chip' + (state.activeTag === tag ? ' active' : ''), tag);
+    const c = el('button', 'chip' + (state.activeTag === tag ? ' active' : ''), esc(tag));
     c.addEventListener('click', () => { state.activeTag = state.activeTag === tag ? null : tag; renderTagChips(); drawGrid(); });
     row.appendChild(c);
   });
@@ -516,7 +658,7 @@ function drawGrid() {
 function recipeCard(r) {
   const card = el('div', 'recipe-card');
   const thumb = el('div', 'thumb');
-  if (r.image_url) thumb.style.backgroundImage = `url('${r.image_url}')`;
+  if (safeUrl(r.image_url)) thumb.style.backgroundImage = bgImage(r.image_url);
   else thumb.textContent = r.title[0];
   card.appendChild(thumb);
 
@@ -526,8 +668,8 @@ function recipeCard(r) {
   card.appendChild(fav);
 
   const body = el('div', 'body');
-  body.appendChild(el('h3', null, r.title));
-  body.appendChild(el('div', 'source', r.source || 'Your kitchen'));
+  body.appendChild(el('h3', null, esc(r.title)));
+  body.appendChild(el('div', 'source', esc(r.source || 'Your kitchen')));
   card.appendChild(body);
 
   card.addEventListener('click', () => openDetail(r.id));
@@ -596,7 +738,7 @@ async function openMemberShareSheet(recipe) {
     return;
   }
   data.forEach(m => {
-    const c = el('button', 'chip', `${m.name} <span style="opacity:.6;">· ${m.household_name}</span>`);
+    const c = el('button', 'chip', `${esc(m.name)} <span style="opacity:.6;">· ${esc(m.household_name)}</span>`);
     c.addEventListener('click', () => {
       c.classList.toggle('active');
       if (memberShareSelected.has(m.id)) memberShareSelected.delete(m.id);
@@ -647,12 +789,12 @@ function showShareSplash(share) {
   const snap = share.recipe_snapshot || {};
   qs('#share-splash-from').textContent = `Shared by ${snap.shared_by_name || 'a family member'}`;
   qs('#share-splash-title').textContent = snap.title || 'Untitled recipe';
-  qs('#share-splash-thumb').style.backgroundImage = snap.image_url ? `url('${snap.image_url}')` : 'none';
+  qs('#share-splash-thumb').style.backgroundImage = bgImage(snap.image_url);
   const lines = (snap.notes || '').split('\n').map(s => s.trim()).filter(Boolean);
   qs('#share-splash-notes-label').hidden = !lines.length;
   const notesBox = qs('#share-splash-notes');
   notesBox.innerHTML = '';
-  lines.forEach(l => notesBox.appendChild(el('div', 'note-card', l)));
+  lines.forEach(l => notesBox.appendChild(el('div', 'note-card', esc(l))));
   const remaining = state.shareQueue.length - 1;
   qs('#share-splash-queue-note').textContent = remaining > 0 ? `+${remaining} more waiting` : '';
   openSheet('share-splash', 'share-splash-backdrop');
@@ -721,6 +863,15 @@ qs('#profile-password-save').addEventListener('click', async () => {
   toast('Password updated');
 });
 
+// Local scope: works with no signal, and only signs out this phone.
+qs('#profile-sign-out').addEventListener('click', async () => {
+  if (!confirm('Sign out of Recipe Box on this device?')) return;
+  clearLocalData();
+  state.member = null;
+  await supabase.auth.signOut({ scope: 'local' });
+  location.reload();
+});
+
 async function deleteRecipeEverywhere(r) {
   await supabase.from('favorites').delete().eq('recipe_id', r.id);
   await supabase.from('meal_plan').delete().eq('recipe_id', r.id);
@@ -740,6 +891,7 @@ async function toggleFavorite(recipeId, btnEl) {
     state.favorites.add(recipeId);
     await supabase.from('favorites').insert({ member_id: state.member.id, recipe_id: recipeId });
   }
+  writeSnap('favorites', [...state.favorites]);
   if (btnEl) btnEl.classList.toggle('active', !isFav);
 }
 
@@ -769,13 +921,13 @@ function renderRecipeDetail(r, { preview }) {
   qs('#detail-actions-preview').hidden = !preview;
   qs('#detail-share-icon').hidden = false;
 
-  qs('#detail-hero').style.backgroundImage = r.image_url ? `url('${r.image_url}')` : 'none';
-  qs('#detail-hero').style.display = r.image_url ? '' : 'none';
+  qs('#detail-hero').style.backgroundImage = bgImage(r.image_url);
+  qs('#detail-hero').style.display = safeUrl(r.image_url) ? '' : 'none';
   qs('#detail-title').textContent = r.title;
   const ratingHtml = r.rating ? ` &nbsp;<span class="rating-line">★ ${Number(r.rating).toFixed(1)}${r.rating_count ? ` <span class="count">· ${r.rating_count} ratings</span>` : ''}</span>` : '';
-  qs('#detail-source').innerHTML = (r.source_url
-    ? `From <a href="${r.source_url}" target="_blank" rel="noopener">${r.source || 'the web'}</a>`
-    : (r.source ? `From ${r.source}` : `Added by ${state.member.name}`)) + ratingHtml;
+  qs('#detail-source').innerHTML = (safeUrl(r.source_url)
+    ? `From <a href="${esc(safeUrl(r.source_url))}" target="_blank" rel="noopener">${esc(r.source || 'the web')}</a>`
+    : (r.source ? `From ${esc(r.source)}` : `Added by ${esc(state.member.name)}`)) + ratingHtml;
   qs('#detail-prep').textContent = r.prep_time || '–';
   qs('#detail-cook').textContent = r.cook_time || '–';
   qs('#detail-times').textContent = `${r.times_cooked || 0}×`;
@@ -854,7 +1006,7 @@ function renderDetailIngredients() {
     const disp = ingredientDisplay(ing, scale);
     const row = el('div', 'ingredient-row');
     row.innerHTML = `<div class="check-circle" data-i="${i}"><svg viewBox="0 0 24 24" fill="none" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div>
-      <div class="amt">${disp.amt}</div><div class="txt">${disp.text}</div>`;
+      <div class="amt">${esc(disp.amt)}</div><div class="txt">${esc(disp.text)}</div>`;
     row.querySelector('.check-circle').addEventListener('click', (e) => {
       e.currentTarget.classList.toggle('checked');
       updateGroceryBtnLabel();
@@ -875,7 +1027,7 @@ function renderDetailSteps() {
   box.innerHTML = '';
   (r.steps || []).forEach((s, i) => {
     const row = el('div', 'step-row');
-    row.innerHTML = `<div class="step-num">${i + 1}</div><div class="step-text">${s}</div>`;
+    row.innerHTML = `<div class="step-num">${i + 1}</div><div class="step-text">${esc(s)}</div>`;
     box.appendChild(row);
   });
 }
@@ -887,7 +1039,7 @@ function renderDetailNotes() {
   box.innerHTML = '';
   const lines = (r.notes || '').split('\n').map(s => s.trim()).filter(Boolean);
   label.hidden = !lines.length;
-  lines.forEach(line => box.appendChild(el('div', 'note-card', line)));
+  lines.forEach(line => box.appendChild(el('div', 'note-card', esc(line))));
 }
 
 function memberNameFor(r) {
@@ -1122,7 +1274,7 @@ qs('#import-go').addEventListener('click', async () => {
     await importFromUrl(url, status);
   } catch (err) {
     status.hidden = false;
-    status.innerHTML = `Couldn't auto-import that link (${err.message}). You can still <button class="btn-ghost" id="fallback-manual" style="padding:0;">paste the ingredients and steps by hand</button>.`;
+    status.innerHTML = `Couldn't auto-import that link (${esc(err.message)}). You can still <button class="btn-ghost" id="fallback-manual" style="padding:0;">paste the ingredients and steps by hand</button>.`;
     qs('#fallback-manual')?.addEventListener('click', () => qs('#import-manual').click());
   }
 });
@@ -1173,12 +1325,12 @@ let discActionTarget = null;
 function discoverCard(r) {
   const card = el('div', 'recipe-card');
   const thumb = el('div', 'thumb');
-  if (r.image) thumb.style.backgroundImage = `url('${r.image}')`;
+  if (safeUrl(r.image)) thumb.style.backgroundImage = bgImage(r.image);
   else thumb.textContent = r.title[0] || '?';
   card.appendChild(thumb);
   const body = el('div', 'body');
-  body.appendChild(el('h3', null, r.title));
-  body.appendChild(el('div', 'source', r.source));
+  body.appendChild(el('h3', null, esc(r.title)));
+  body.appendChild(el('div', 'source', esc(r.source)));
   if (r.rating) body.appendChild(el('div', 'rating-line', `★ ${Number(r.rating).toFixed(1)}${r.rating_count ? ` <span class="count">(${r.rating_count})</span>` : ''}`));
   card.appendChild(body);
   card.addEventListener('click', async () => {
@@ -1249,7 +1401,7 @@ qs('#filter-sources-btn').addEventListener('click', async () => {
   const list = qs('#sources-chip-list');
   list.innerHTML = '';
   disc.allSites.forEach(s => {
-    const c = el('button', 'chip' + (disc.sources.includes(s.host) ? ' active' : ''), s.name);
+    const c = el('button', 'chip' + (disc.sources.includes(s.host) ? ' active' : ''), esc(s.name));
     c.dataset.host = s.host;
     c.addEventListener('click', () => c.classList.toggle('active'));
     list.appendChild(c);
@@ -1533,11 +1685,16 @@ qs('#ed-save').addEventListener('click', async () => {
 const STARTER_STAPLES = ['Eggs', 'Milk', 'Bread', 'Bananas', 'Butter', 'Cereal', 'Coffee', 'Fruit'];
 
 async function loadGrocery() {
-  const { data } = await supabase.from('grocery_items').select('*, recipes(title)').order('created_at', { ascending: true });
-  state.groceryItems = data || [];
+  if (state.groceryLoaded) drawGrocery();   // instant paint from the last copy
   // learn frequent buys from the last 90 days (survives list clearing)
   const since = new Date(Date.now() - 90 * 86400000).toISOString();
-  const { data: hist } = await supabase.from('grocery_history').select('item').gte('added_at', since) || {};
+  const [{ data, error }, { data: hist }] = await Promise.all([
+    supabase.from('grocery_items').select('*, recipes(title)').order('created_at', { ascending: true }),
+    supabase.from('grocery_history').select('item').gte('added_at', since),
+  ]);
+  if (error) return;   // no signal: keep the list that's on screen
+  state.groceryItems = data;
+  state.groceryLoaded = true;
   const counts = {};
   // grocery_history doesn't currently store who added an item (no added_by column), so chips
   // aren't attributable yet — h.added_by is undefined today. If that column gets added later,
@@ -1559,6 +1716,7 @@ async function loadGrocery() {
 }
 
 function drawGrocery() {
+  writeSnap('grocery', { items: state.groceryItems, quickAdd: state.quickAdd || [] });
   const content = qs('#grocery-content');
   content.innerHTML = '';
   qs('#grocery-empty').hidden = state.groceryItems.length > 0;
@@ -1570,7 +1728,7 @@ function drawGrocery() {
     content.appendChild(el('div', 'cat-label', 'Quick add'));
     const row = el('div', 'chip-wrap');
     quick.forEach(q => {
-      const c = el('button', 'chip', `+ ${q}`);
+      const c = el('button', 'chip', `+ ${esc(q)}`);
       const attributedId = (state.quickAddBy || {})[q.toLowerCase()];
       const badge = attributedId ? memberBadge(attributedId) : null;
       if (badge) { badge.classList.add('member-badge-chip'); c.appendChild(badge); }
@@ -1597,7 +1755,7 @@ function drawGrocery() {
     if (names.length) {
       const row = el('div', 'chip-wrap');
       row.style.marginTop = '10px';
-      names.forEach(t => row.appendChild(el('span', 'chip', `🍳 ${t}`)));
+      names.forEach(t => row.appendChild(el('span', 'chip', `🍳 ${esc(t)}`)));
       content.appendChild(row);
     }
   }
@@ -1640,8 +1798,8 @@ function drawGrocery() {
 function groceryRow(item) {
   const row = el('div', 'grocery-row' + (item.checked ? ' checked' : ''));
   row.innerHTML = `<div class="check-circle${item.checked ? ' checked' : ''}"><svg viewBox="0 0 24 24" fill="none" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></div>
-    <div class="txt">${item.item}</div>
-    ${item.amount ? `<div class="amt">${item.amount}</div>` : ''}`;
+    <div class="txt">${esc(item.item)}</div>
+    ${item.amount ? `<div class="amt">${esc(item.amount)}</div>` : ''}`;
   const badge = memberBadge(item.added_by);
   if (badge) row.appendChild(badge);
   row.querySelector('.check-circle').addEventListener('click', () => {
@@ -1735,12 +1893,19 @@ function visiblePlanDays() {
   return days;
 }
 
+let planSeq = 0;
+
 async function loadPlan() {
+  const seq = ++planSeq;
+  if (state.planLoaded) drawPlan();   // instant paint from the last copy
   const days = visiblePlanDays();
-  const { data } = await supabase.from('meal_plan').select('*, recipes(*)')
+  const { data, error } = await supabase.from('meal_plan').select('*, recipes(*)')
     .gte('planned_date', days[0]).lte('planned_date', days[days.length - 1]);
+  if (error || seq !== planSeq) return;   // no signal, or a newer load (range changed) is in flight
   state.planEntries = {};
-  (data || []).forEach(row => { state.planEntries[row.planned_date] = row; });
+  data.forEach(row => { state.planEntries[row.planned_date] = row; });
+  state.planLoaded = true;
+  writeSnap('plan', state.planEntries);
   drawPlan();
 }
 
@@ -1810,7 +1975,7 @@ function openPlanPickerFor(recipe, { tryout = false, moveEntry = null } = {}) {
   days.forEach(day => {
     const occupied = state.planEntries[day];
     const occupiedLabel = occupied ? (occupied.recipe_id ? occupied.recipes.title : occupied.note) : '';
-    const row = el('button', 'day-slot', `<div><div style="font-weight:700;">${formatDayLabel(day)}</div><div style="font-size:0.75rem;color:var(--color-ink-faint);">${formatDateSub(day)}${occupied ? ' · ' + occupiedLabel : ''}</div></div>`);
+    const row = el('button', 'day-slot', `<div><div style="font-weight:700;">${formatDayLabel(day)}</div><div style="font-size:0.75rem;color:var(--color-ink-faint);">${formatDateSub(day)}${occupied ? ' · ' + esc(occupiedLabel) : ''}</div></div>`);
     row.style.width = '100%';
     row.style.marginBottom = '10px';
     row.addEventListener('click', async () => {
@@ -1884,10 +2049,10 @@ function drawPlan() {
     if (entry) {
       if (entry.recipe_id && entry.recipes) {
         const tryout = entry.recipes.in_box === false;
-        slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;">${entry.recipes.title}${tryout ? ' <span style="font-size:0.62rem;color:var(--color-gold);font-weight:700;">TRYING IT</span>' : ''}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to open · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
+        slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;">${esc(entry.recipes.title)}${tryout ? ' <span style="font-size:0.62rem;color:var(--color-gold);font-weight:700;">TRYING IT</span>' : ''}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Tap to open · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
         slot.querySelector('div').addEventListener('click', () => openDetail(entry.recipes.id));
       } else {
-        slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;font-style:italic;">${entry.note || 'Custom'}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Custom · tap to edit · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
+        slot.innerHTML = `<div style="flex:1;"><div style="font-weight:700;font-style:italic;">${esc(entry.note || 'Custom')}</div><div style="font-size:0.72rem;color:var(--color-ink-faint);">Custom · tap to edit · hold to move</div></div><button class="slot-remove" title="Remove">✕</button>`;
         slot.querySelector('div').addEventListener('click', () => openQuickNoteSheet(day, entry));
       }
       slot.querySelector('.slot-remove').addEventListener('click', async (e) => {

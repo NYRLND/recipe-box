@@ -1,19 +1,28 @@
 # Recipe Box
 
-A shared recipe box, grocery list, and 3-day meal plan for Dan & Melissa. No login, installs to the home screen like a native app.
+A shared recipe box, grocery list, and meal plan for each family household. Installs to the home screen like a native app.
+
+## Accounts and households
+
+- Everyone signs in with their own email and password (Supabase Auth). There's no sign-up screen — accounts are created in the Supabase dashboard and linked to a `household_members` row via `auth_user_id`.
+- Each household (Baker-Ryan, Steve & Malinda's, Kelsey & Chase's) only sees its own recipes, plan, grocery list and favorites. That's enforced by row-level security in the database (`my_household_id()`), not by the app.
+- Recipes can be shared across households. A share sends a copy, not a live link.
+- Baker-Ryan's grocery list is also shown in Hearth, which uses the same Supabase project.
+
+## Speed and offline
+
+- The service worker (`sw.js`) opens the app from the phone's cache and checks for updates in the background, so a new deploy shows up on the second launch. **Bump `CACHE` in `sw.js` on every deploy.**
+- Each screen draws first from a copy saved on the phone (`rb_snap_*` in localStorage), then refreshes from Supabase. If a fetch fails, the saved copy stays on screen. Signing out clears it.
+- Launch uses the saved session and member, so a weak signal never shows the login screen. Only a definite "this account isn't linked" answer from the server signs someone out.
 
 ## One-time setup
 
-1. **Supabase** — run the SQL from your setup chat in the SQL Editor if you haven't already.
-2. **Edge Function** — in the Supabase Dashboard, go to Edge Functions → Deploy a new function → Via Editor. Name it `import-recipe`, paste in the contents of `edge-function/import-recipe/index.ts`, and click Deploy.
-3. **Config** — edit `js/config.js`:
-   - `SUPABASE_URL`: Project Settings → API → Project URL
-   - `SUPABASE_ANON_KEY`: Project Settings → API Keys → the **Publishable** key (sometimes still labeled "anon public" on older projects — either is safe to use in client-side code)
-4. **GitHub Pages** — Settings → Pages → Deploy from branch → `main` / root.
-5. Open the Pages URL on both phones → Share → **Add to Home Screen**.
+1. **Supabase**: `schema.sql` documents the schema and policies. It's safe to re-run.
+2. **Edge Function**: deploy `edge-function/import-recipe/index.ts` as `import-recipe`.
+3. **Config**: `js/config.js` holds the project URL and publishable key. Both are safe in client code.
+4. **GitHub Pages**: deploy from `main` / root.
 
 ## Notes
 
-- Import works by reading the same structured recipe data (JSON-LD) that sites embed for Google — this covers Damn Delicious, Once Upon a Chef, NYT Cooking, and most food blogs. If a site doesn't have it, use "Or type in a recipe by hand."
-- Grocery list merging is simple string-matching, not real unit conversion — if you add "1 cup flour" from one recipe and "200g flour" from another, they'll show as two separate lines rather than being combined.
-- The two profiles (Dan/Melissa) are just a lightweight switcher, not real authentication — anyone with the link can use the app as either of you. Fine for a household app; not meant for anything sensitive.
+- Import reads the structured recipe data (JSON-LD) that sites embed for Google. If a site doesn't have it, use "Or type in a recipe by hand."
+- Grocery merging is string matching, not unit conversion. "1 cup flour" and "200g flour" stay as two lines.
